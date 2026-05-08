@@ -26,19 +26,20 @@ export function Seat({
     top: orbit.top,
     transform: orbit.transform,
     zIndex: orbit.zIndex,
-  } as const;
+    '--seat-depth': orbit.depth,
+  } as React.CSSProperties;
 
   const markerShellClass =
     [
       'seat-marker-shell',
-      user ? '' : 'empty-seat-marker-slot',
+      user ? '' : 'vacant',
       user && seatIndex === 0 ? 'seat-marker-crown-slot' : '',
       user && isCurrentUser ? 'seat-marker-shell-current' : '',
+      user?.isSpeaking ? 'seat-speaking' : '',
     ]
       .filter(Boolean)
       .join(' ');
 
-  /** Клик для reply только по чужой занятой иконке. Пустые места не интерактивны (см. требование). */
   const canPickReply =
     Boolean(onReplySeatPick) && Boolean(user) && !isCurrentUser;
 
@@ -61,21 +62,28 @@ export function Seat({
 
   if (!user) {
     return (
-      <div className="seat-marker-shell empty-seat-marker-slot vacant" style={markerStyle}>
-        <div className="empty-seat-marker" aria-hidden />
-        <span className="sr-only">Vacant place {seatIndex + 1}</span>
+      <div className={markerShellClass} style={markerStyle}>
+        <div className="seat-marker">
+          <div className="seat-avatar-slot">
+            <KnightAvatar avatarId={0} isEmpty={true} size="medium" />
+          </div>
+        </div>
       </div>
     );
   }
 
   const markerInner = (
     <>
-      {user.isSpeaking ? <span className="seat-speaking-ring seat-speaking-ring-live" aria-hidden /> : null}
-      <span className="seat-marker-highlight" aria-hidden />
+      {user.isSpeaking ? (
+        <span className="seat-speaking-ring seat-speaking-ring-live" aria-hidden />
+      ) : null}
       <div className="seat-avatar-slot">
         <KnightAvatar avatarId={user.avatarId} isEmpty={false} size="medium" />
       </div>
-      <span className={`seat-mic-indicator ${user.micEnabled ? 'seat-mic-on' : 'seat-mic-off'}`} aria-hidden>
+      <span
+        className={`seat-mic-indicator ${user.micEnabled ? 'seat-mic-on' : 'seat-mic-off'}`}
+        aria-hidden
+      >
         {user.micEnabled ? (
           <Mic className="seat-mic-indicator-icon" />
         ) : (
@@ -95,10 +103,9 @@ export function Seat({
       <div className={markerShellClass} style={markerStyle}>
         <button
           type="button"
-          className={`seat-marker seat-marker-filled seat-marker-interactive`}
+          className="seat-marker seat-marker-filled seat-marker-interactive"
           aria-label={`Reply to ${user.knightName}`}
           title={user.knightName}
-          style={{ boxShadow: orbit.boxShadow }}
           onClick={pickReplyTarget}
           onKeyDown={handleKeyDown}
         >
@@ -118,10 +125,7 @@ export function Seat({
       aria-label={label}
       title={user.knightName}
     >
-      <div
-        className="seat-marker seat-marker-filled seat-marker-self"
-        style={{ boxShadow: orbit.boxShadow }}
-      >
+      <div className="seat-marker seat-marker-filled seat-marker-self">
         {markerInner}
       </div>
     </div>

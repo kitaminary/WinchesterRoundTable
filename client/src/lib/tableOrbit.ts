@@ -1,6 +1,5 @@
 export const ROUND_TABLE_SEAT_COUNT = 13;
 
-
 const RAD = Math.PI / 180;
 
 /**
@@ -13,6 +12,7 @@ export function seatAngleStepDegrees(seatCount: number): number {
 /**
  * Полярный угол центра сектора wedge(seatIndex) в радианах.
  * Стандарт math: −π/2 = «вверх» по SVG (место 0 поднято к верхнему центру экрана).
+ * Используется для отрисовки wedges на столешнице.
  */
 export function wedgeMidAngleRadians(seatIndex: number, seatCount: number): number {
   const stepDeg = seatAngleStepDegrees(seatCount);
@@ -20,8 +20,56 @@ export function wedgeMidAngleRadians(seatIndex: number, seatCount: number): numb
 }
 
 /**
+ * Perspective positioning data for seat avatar medallions.
+ * Seats arranged in an elliptical orbit matching the tilted table perspective.
+ */
+export interface SeatPerspectivePosition {
+  xPercent: number;
+  yPercent: number;
+  scale: number;
+  depth: number;
+  zIndex: number;
+  bubbleYOffset: number;
+}
+
+/**
+ * Calculate perspective position for a seat in the 3D table scene.
+ * Uses ellipse orbit to match tilted table visual.
+ * Top/back seats = smaller & dimmer, Bottom/front seats = larger & closer.
+ */
+export function seatPerspectivePosition(
+  seatIndex: number,
+  totalSeats: number
+): SeatPerspectivePosition {
+  const angle = -Math.PI / 2 + (seatIndex / totalSeats) * Math.PI * 2;
+
+  const orbitRadiusX = 40;
+  const orbitRadiusY = 34;
+
+  const centerX = 46;
+  /** Сдвиг вниз относительно визуального центра наклонённой столешницы */
+  const centerY = 54;
+
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  const xPercent = centerX + cos * orbitRadiusX;
+  const yPercent = centerY + sin * orbitRadiusY;
+
+  const depth = (sin + 1) / 2;
+
+  const scale = 0.74 + depth * 0.34;
+
+  const zIndex = 0 + Math.round(depth * 60);
+
+  const bubbleYOffset = 82 + depth * 18;
+
+  return { xPercent, yPercent, scale, depth, zIndex, bubbleYOffset };
+}
+
+/**
+ * Legacy interface for backward compatibility.
  * Эллипс мест в координатах оверлея (процента от .round-table).
- * Совпадает с радиальной раскладкой секторов на столе (−90° + i * step).
  * Верх экрана: меньший scale/z; низ — больше («ближе»).
  */
 export interface SeatOrbitStyle {
@@ -30,46 +78,32 @@ export interface SeatOrbitStyle {
   transform: string;
   zIndex: number;
   boxShadow: string;
+  depth: number;
 }
 
+/**
+ * Get seat orbit transform using new perspective positioning.
+ * Returns CSS-ready values for absolute positioning.
+ */
 export function getSeatOrbitTransform(
   seatIndex: number,
   seatCount: number
 ): SeatOrbitStyle {
-  const t = wedgeMidAngleRadians(seatIndex, seatCount);
+  const pos = seatPerspectivePosition(seatIndex, seatCount);
 
-  /** Радиус кольца немного поверх края столешницы в плане сцены. */
-  const rx = 43.5;
-  const ry = 38.2;
+  const blur = 10 + pos.depth * 18;
+  const yOff = 3 + pos.depth * 9;
+  const alpha = 0.28 + pos.depth * 0.2;
+  const boxShadow = `0 ${yOff.toFixed(1)}px ${blur.toFixed(1)}px rgba(0,0,0,${alpha.toFixed(2)})`;
 
-  const xPct = 50 + rx * Math.cos(t);
-  const yPct = 50 + ry * Math.sin(t);
-
-  const sinT = Math.sin(t);
-  const depth01 = (sinT + 1) / 2;
-
-  const scaleMin = 0.78;
-  const scaleMax = 1.18;
-  const scale = scaleMin + depth01 * (scaleMax - scaleMin);
-
-  const zIndex = 52 + Math.round(depth01 * 88);
-
-  const blur = 5 + depth01 * 18;
-  const yOff = 3 + depth01 * 11;
-  const alpha = 0.22 + depth01 * 0.4;
-  const boxShadow = `0 ${yOff.toFixed(1)}px ${blur.toFixed(1)}px rgba(0,0,0,${alpha.toFixed(2)}), 0 0 0 1px rgba(188,155,74,0.15)`;
-
-  /** Небольшое вертикальное смещение: верхнее кольцо чуть поднять, нижнее приземлить для читаемой глубины. */
-  const dyPx = -4 + depth01 * 10;
-
-  /** Без декоративного rotate — только screen-facing масштаб и смещение. */
-  const transform = `translate(-50%, -50%) translate(0px, ${dyPx.toFixed(2)}px) scale(${scale.toFixed(4)})`;
+  const transform = `translate(-50%, -50%) scale(${pos.scale.toFixed(4)})`;
 
   return {
-    left: `${xPct.toFixed(3)}%`,
-    top: `${yPct.toFixed(3)}%`,
+    left: `${pos.xPercent.toFixed(3)}%`,
+    top: `${pos.yPercent.toFixed(3)}%`,
     transform,
-    zIndex,
+    zIndex: pos.zIndex,
     boxShadow,
+    depth: pos.depth,
   };
 }
