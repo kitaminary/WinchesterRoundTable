@@ -259,7 +259,7 @@ body {
 }
 
 .room-toolbar {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto 0.75rem;
   padding: 0 0.15rem;
 }
@@ -461,8 +461,9 @@ body {
 
   .chat-panel {
     border-radius: 8px;
-    flex: 1 1 auto;
     min-height: 0;
+    max-height: none;
+    flex: 1 1 100%;
     max-height: none;
   }
 
@@ -1263,7 +1264,7 @@ body {
 .chat-panel {
   display: flex;
   flex-direction: column;
-  flex: 1 1 100%;
+  max-height: 520px;
   color-scheme: dark;
   background: linear-gradient(168deg,
       rgba(236, 226, 190, 0.1) 0%,
