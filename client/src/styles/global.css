@@ -667,16 +667,16 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  max-width: clamp(88px, 12vw, 140px);
+  max-width: clamp(60px, 8.5vw, 108px);
   text-align: center;
   pointer-events: none;
 }
 
 .seat-name-label {
   font-family: var(--font-display, Cinzel), Georgia, 'Times New Roman', serif;
-  font-size: clamp(0.55rem, 1.05vw, 0.72rem);
+  font-size: clamp(0.52rem, 1vw, 0.68rem);
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   line-height: 1.15;
   color: rgba(246, 234, 200, 0.95);
   text-shadow:

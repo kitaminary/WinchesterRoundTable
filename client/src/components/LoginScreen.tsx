@@ -2,11 +2,14 @@ import { useState, FormEvent } from 'react';
 import { Shield, LogIn, UserPlus, Loader2 } from 'lucide-react';
 import type { AuthUser } from '../lib/authSession';
 
-const AVATAR_COUNT = 13;
+const AVATAR_COUNT = 24;
 const AVATAR_LABELS = [
   'Iron Hawk', 'Silver Wolf', 'Bronze Bull', 'Gold Dragon',
   'Crimson Fox', 'Stone Bear', 'Sea Serpent', 'Forest Stag',
   'Shadow Raven', 'Thunder Horse', 'Sacred Owl', 'Flame Wyvern', 'Crystal Lion',
+  'Iron Hawk', 'Silver Wolf', 'Bronze Bull', 'Gold Dragon',
+  'Crimson Fox', 'Stone Bear', 'Sea Serpent', 'Forest Stag',
+  'Shadow Raven', 'Thunder Horse', 'Sacred Owl'
 ];
 
 interface LoginScreenProps {

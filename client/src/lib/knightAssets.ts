@@ -1,4 +1,4 @@
-export const KNIGHT_PORTRAIT_COUNT = 13;
+export const KNIGHT_PORTRAIT_COUNT = 24;
 
 /**
  * avatarId сервера — 0..12; файлы статики `/knights/knight1.png` … `knight13.png`.

@@ -227,27 +227,27 @@ const RIM_AROUND_NAMES = [
   'Sir Alynore',
   'Sir Bedwere',
   'Sir Blubrys',
-  'Sir Bors Deganys',
+  'Sir Bors ',
   'Sir Brumear',
   'Sir Dagonet',
   'Sir Degore',
-  'Sir Ectorde Marys',
+  'Sir Ectorde',
   'Sir Galahallt',
   'Sir Garethe',
   'Sir Gauen',
   'Sir Kay',
   'Sir Lamorak',
-  'Sir Launcelot Deulake',
-  'Sir Lacotemale Tayle',
+  'Sir Launcelot',
+  'Sir Lacotemale',
   'Sir Lucane',
-  'Sir Lybyus Dysconyus',
+  'Sir Lybyus',
   'Sir Lyonell',
   'Sir Mordrede',
   'Sir Plomyde',
   'Sir Pelleus',
   'Sir Percyvale',
   'Sir Safer',
-  'Sir Trystram Delyens',
+  'Sir Trystram',
 ] as const;
 
 const RIM_INNER_NAMES = [
@@ -330,6 +330,10 @@ function RimCurvedSeatLabel({
   arcHeight = 3.63,
   fontSize = 4,
   arcCharsPerUnit = 1.65,
+  /** <1 сжимает глифы по горизонтали в локальной системе после поворота */
+  glyphCompressX = 1,
+  /** false — весь текст одним цветом (без красной инициали) */
+  accentFirstLetter = true,
 }: {
   seatIndex: number;
   text: string;
@@ -339,15 +343,20 @@ function RimCurvedSeatLabel({
   fontSize?: number;
   /** горизонтальный масштаб дуги textPath; на малом радиусе меньше, чтобы не наезжать на соседние сектора */
   arcCharsPerUnit?: number;
+  glyphCompressX?: number;
+  accentFirstLetter?: boolean;
 }) {
   const midRad = wedgeMidAngleRadians(seatIndex, ROUND_TABLE_SEAT_COUNT);
   const lx = 50 + textRadius * Math.cos(midRad);
   const ly = 50 + textRadius * Math.sin(midRad);
   const rot = rimLabelReadableRotation(lx, ly);
   const arcWidth = Math.max(7.5, String(text).length * arcCharsPerUnit);
+  const sx = Math.min(1, Math.max(0.55, glyphCompressX));
 
   return (
-    <g transform={`translate(${lx.toFixed(3)} ${ly.toFixed(3)}) rotate(${rot.toFixed(2)})`}>
+    <g
+      transform={`translate(${lx.toFixed(3)} ${ly.toFixed(3)}) rotate(${rot.toFixed(2)}) scale(${sx.toFixed(3)} 1)`}
+    >
       <defs>
         <path
           id={pathId}
@@ -364,17 +373,21 @@ function RimCurvedSeatLabel({
         fontFamily="var(--font-cloister-black)"
         fontSize={fontSize}
         fontWeight={700}
-        letterSpacing={-0.1}
+        letterSpacing={-0.26}
         fill="rgba(47, 32, 18, 0.8)"
         stroke="rgba(255, 246, 218, 0.22)"
         strokeWidth={0.035}
       >
         <textPath href={`#${pathId}`} startOffset="55%" textAnchor="middle">
           {text.length > 0 ? (
-            <>
-              <tspan fill="var(--accent-red)">{text[0]}</tspan>
-              <tspan>{text.slice(1)}</tspan>
-            </>
+            accentFirstLetter ? (
+              <>
+                <tspan fill="var(--accent-red)">{text[0]}</tspan>
+                <tspan>{text.slice(1)}</tspan>
+              </>
+            ) : (
+              <tspan>{text}</tspan>
+            )
           ) : null}
         </textPath>
       </text>
@@ -668,7 +681,7 @@ function TablePaintedSurface() {
         fontFamily="var(--font-cloister-black)"
         fontSize={1.68}
         fontWeight={700}
-        letterSpacing={0.1}
+        letterSpacing={0.02}
         fill="rgba(47, 32, 18, 0.8)"
         stroke="rgba(255, 246, 218, 0.22)"
         strokeWidth={0.035}
@@ -682,6 +695,8 @@ function TablePaintedSurface() {
             pathId={`rim-inner-name-arc-${seatIndex}`}
             arcHeight={2.45}
             arcCharsPerUnit={0.36}
+            glyphCompressX={0.7}
+            accentFirstLetter={name === '୧' || name === '୨'}
           />
         ))}
       </g>
@@ -694,7 +709,7 @@ function TablePaintedSurface() {
         fontFamily="var(--font-cloister-black)"
         fontSize={1.68}
         fontWeight={700}
-        letterSpacing={0.1}
+        letterSpacing={0.02}
         fill="rgba(47, 32, 18, 0.8)"
         stroke="rgba(255, 246, 218, 0.22)"
         strokeWidth={0.035}
@@ -706,6 +721,8 @@ function TablePaintedSurface() {
             text={name}
             textRadius={OUTER_NAME_BAND.textR}
             pathId={`rim-name-arc-${seatIndex}`}
+            arcCharsPerUnit={2}
+            glyphCompressX={0.67}
           />
         ))}
       </g>
