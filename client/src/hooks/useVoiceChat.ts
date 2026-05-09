@@ -178,7 +178,7 @@ export function useVoiceChat(
         err instanceof DOMException ? err.name : err instanceof Error ? err.name : '';
       if (name === 'NotAllowedError') {
         errorMessage =
-          'Microphone permission was denied. Allow access in the browser, or use HTTPS (ngrok) or localhost.';
+          'Microphone permission was denied';
       } else if (name === 'NotFoundError') {
         errorMessage = 'No microphone was found on this device.';
       }

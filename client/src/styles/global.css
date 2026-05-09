@@ -7,6 +7,10 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: clip;
+}
+
 html,
 body {
   margin: 0;
@@ -16,6 +20,10 @@ body {
   font-family: var(--font-body);
   font-size: 17px;
   line-height: 1.45;
+}
+
+body {
+  overflow-x: clip;
 }
 
 #root {
@@ -361,7 +369,7 @@ body {
 }
 
 .table-section {
-  position: absolute;
+  position: fixed;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -378,10 +386,96 @@ body {
 }
 
 @media (max-width: 992px) {
+
+  .sidebar:not(.sidebar-left) {
+    height: 100%;
+  }
+
+  #root {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  .room-screen {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .room-toolbar {
+    flex-shrink: 0;
+    max-width: 100%;
+    margin-bottom: 0.5rem;
+  }
+
+  .room-toolbar-inner {
+    min-width: 0;
+  }
+
+  .leave-table-button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .room-toolbar-seat {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .room-main {
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
     width: 100%;
-    gap: 1rem;
+    max-width: 100%;
+    gap: 0.75rem;
+    overflow: hidden;
+  }
+
+  .sidebar.sidebar-left {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    position: relative;
+    z-index: 2;
+  }
+
+  .chat-panel {
+    border-radius: 8px;
+    flex: 1;
+  }
+
+  .chat-messages {
+    flex: 1 1 auto;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .chat-empty {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .chat-input-section {
+    flex-shrink: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
@@ -905,8 +999,8 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  padding: 0.75rem 0.88rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.68rem;
   background: linear-gradient(168deg, rgba(240, 228, 192, 0.08) 0%, rgba(22, 18, 12, 0.92) 100%);
   border: 1px solid rgba(212, 175, 55, 0.38);
   border-radius: 10px;
@@ -925,8 +1019,8 @@ body {
 
 .voice-button {
   position: relative;
-  width: 38px;
-  height: 38px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   border: 2px solid rgba(188, 150, 60, 0.55);
   background: linear-gradient(185deg, #3a362f, #1e1b18);
@@ -1006,14 +1100,16 @@ body {
   flex-basis: 100%;
   display: flex;
   align-items: flex-start;
+  max-height: 30px;
   gap: 0.35rem;
   margin-top: 0.5rem;
-  padding: 0.5rem 0.65rem;
+  padding: 0.2rem 0.65rem;
   background: rgba(139, 41, 66, 0.25);
   border: 1px solid rgba(139, 41, 66, 0.55);
   border-radius: 4px;
   font-size: 0.92rem;
   color: #f0d0d8;
+  font-size: 0.7rem;
 }
 
 .voice-error .error-icon {
@@ -1025,6 +1121,7 @@ body {
 
 /* --- Knight roster --- */
 .knight-roster {
+  width: 100%;
   background: linear-gradient(168deg, rgba(240, 228, 192, 0.08) 0%, rgba(22, 18, 12, 0.92) 100%);
   border: 1px solid rgba(212, 175, 55, 0.38);
   border-radius: 10px;
@@ -1166,12 +1263,18 @@ body {
 
 .chat-header {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 0.55rem;
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid rgba(201, 162, 39, 0.4);
   background: rgba(0, 0, 0, 0.24);
   color: var(--gold-bright);
+}
+
+.chat-header-titles-left {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.55rem;
 }
 
 .chat-header-icon {
@@ -1425,6 +1528,7 @@ body {
   min-height: 2.85rem;
   max-height: 7.25rem;
   line-height: 1.42;
+  scrollbar-width: none;
 }
 
 .chat-send-button {

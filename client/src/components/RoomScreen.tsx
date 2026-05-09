@@ -9,7 +9,6 @@ import type {
 } from '../types';
 import { RoundTable } from './RoundTable';
 import { ChatPanel } from './ChatPanel';
-import { VoiceControls } from './VoiceControls';
 import { KnightRoster } from './KnightRoster';
 
 interface RoomScreenProps {
@@ -70,12 +69,6 @@ export function RoomScreen({
       <div className="room-main">
         <div className="sidebar sidebar-left">
           <KnightRoster users={users} currentUserId={currentUser.id} />
-          <VoiceControls
-            micEnabled={micEnabled}
-            isSpeaking={isSpeaking}
-            micError={micError}
-            onToggle={onToggleMic}
-          />
         </div>
         <div className="table-section">
           <RoundTable
@@ -87,6 +80,10 @@ export function RoomScreen({
         </div>
         <div className="sidebar">
           <ChatPanel
+            micEnabled={micEnabled}
+            isSpeaking={isSpeaking}
+            micError={micError}
+            onToggleMic={onToggleMic}
             messages={messages}
             currentUserId={currentUser.id}
             replyTarget={replyTarget}

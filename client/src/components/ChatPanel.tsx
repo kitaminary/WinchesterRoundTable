@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react';
 import { Send, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage, ChatReplyTarget } from '../types';
 import { KnightAvatar } from './KnightAvatar';
+import { Mic, MicOff, AlertCircle } from 'lucide-react';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -10,6 +11,10 @@ interface ChatPanelProps {
   activityNotice: string | null;
   onClearReply: () => void;
   onSendMessage: (text: string, options?: { replyToUserId?: string }) => void;
+  onToggleMic: () => void;
+  micEnabled: boolean;
+  isSpeaking: boolean;
+  micError: string | null;
 }
 
 export function ChatPanel({
@@ -19,6 +24,10 @@ export function ChatPanel({
   activityNotice,
   onClearReply,
   onSendMessage,
+  onToggleMic,
+  micEnabled,
+  isSpeaking,
+  micError,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -67,13 +76,27 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       <div className="chat-header">
-        <MessageSquare className="chat-header-icon" />
-        <div className="chat-header-titles">
+        <div className="chat-header-titles-left">
+          <MessageSquare className="chat-header-icon" />
           <span className="chat-header-title">Council Chamber</span>
-          <span className="chat-header-sub">
-            Messages • arrivals and departures in the banner above
-          </span>
+          <button
+            onClick={onToggleMic}
+            className={`voice-button ${micEnabled ? 'active' : ''} ${isSpeaking ? 'speaking' : ''}`}
+            aria-label={micEnabled ? 'Disable microphone' : 'Enable microphone'}
+          >
+            <div className="voice-button-inner">
+              {micEnabled ? (
+                <Mic className="voice-icon" />
+              ) : (
+                <MicOff className="voice-icon" />
+              )}
+            </div>
+            {isSpeaking && <div className="voice-speaking-ring" />}
+          </button>
         </div>
+        <span className="chat-header-sub">
+          Messages • arrivals and departures in the banner above
+        </span>
       </div>
 
       {activityNotice && (
@@ -168,6 +191,12 @@ export function ChatPanel({
           </button>
         </form>
       </div>
+      {micError && (
+        <div className="voice-error">
+          <AlertCircle className="error-icon" />
+          <span>{micError}</span>
+        </div>
+      )}
     </div>
   );
 }
