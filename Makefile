@@ -2,12 +2,13 @@
 # Usage: make <target>
 
 .PHONY: help docker-check build build-dev up up-dev down restart logs logs-dev \
-        shell db-shell db-list-users clean dev
+        logs-ngrok shell db-shell db-list-users clean dev
 
 # ── Config ────────────────────────────────────────────────────────────────────
 COMPOSE  = docker compose
 SERVICE  = winchester
 POSTGRES = postgres
+NGROK    = ngrok
 
 # ── Help (default) ────────────────────────────────────────────────────────────
 help:
@@ -15,11 +16,12 @@ help:
 	@echo "  Winchester Round Table — commands"
 	@echo ""
 	@echo "  make build          Build the app Docker image"
-	@echo "  make up             Start prod stack (app + postgres) in background"
+	@echo "  make up             Start prod stack (app + postgres + ngrok) in background"
 	@echo "  make up-dev         Dev stack: Vite HMR + tsx watch"
 	@echo "  make down           Stop and remove containers"
 	@echo "  make restart        Restart the prod app service"
 	@echo "  make logs           Follow prod app logs"
+	@echo "  make logs-ngrok     Follow ngrok logs (shows public URL)"
 	@echo "  make logs-dev       Follow dev container logs"
 	@echo "  make build-dev      Build the dev image only"
 	@echo "  make shell          Shell inside running prod app container"
@@ -47,7 +49,7 @@ build-dev: docker-check
 	$(COMPOSE) --profile dev build winchester-dev
 
 up: docker-check
-	$(COMPOSE) up -d --build $(SERVICE) $(POSTGRES)
+	$(COMPOSE) up -d --build $(SERVICE) $(POSTGRES) $(NGROK)
 
 up-dev: docker-check
 	$(COMPOSE) --profile dev up --build winchester-dev $(POSTGRES)
@@ -60,6 +62,9 @@ restart: docker-check
 
 logs: docker-check
 	$(COMPOSE) logs -f $(SERVICE)
+
+logs-ngrok: docker-check
+	$(COMPOSE) logs -f $(NGROK)
 
 logs-dev: docker-check
 	$(COMPOSE) --profile dev logs -f winchester-dev

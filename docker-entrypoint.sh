@@ -4,7 +4,7 @@ set -e
 PORT=${PORT:-3000}
 
 bore_wanted() {
-  _v=$(printf '%s' "${ENABLE_BORE:-1}" | tr '[:upper:]' '[:lower:]')
+  _v=$(printf '%s' "${ENABLE_BORE:-0}" | tr '[:upper:]' '[:lower:]')
   case "$_v" in 0|false|no|off) return 1 ;; esac
   return 0
 }
@@ -15,22 +15,25 @@ echo "  Port:         $PORT"
 echo "  Chat version: ${CHAT_HISTORY_VERSION:-1}"
 echo ""
 
-# ── Start Node.js server in background ───────────────────────────────────────
+# Start Node.js server in background
 node dist/server/index.js &
 SERVER_PID=$!
 
+BORE_PID=""
+
 cleanup() {
+  [ -n "$BORE_PID" ] && kill "$BORE_PID" 2>/dev/null || true
   kill "$SERVER_PID" 2>/dev/null || true
 }
 trap cleanup INT TERM
 
-# ── Wait until the app responds (max 30 s) ────────────────────────────────────
-echo "Waiting for app to be ready…"
+# Wait until the app responds (max 30 s)
+echo "Waiting for app to be ready..."
 TRIES=0
 until curl -sf "http://localhost:$PORT/api/health" > /dev/null 2>&1; do
   TRIES=$((TRIES + 1))
   if [ "$TRIES" -ge 30 ]; then
-    echo "ERROR: App did not start within 30 s — check server logs."
+    echo "ERROR: App did not start within 30 s -- check server logs."
     kill "$SERVER_PID" 2>/dev/null || true
     exit 1
   fi
@@ -39,20 +42,19 @@ done
 echo "App is ready."
 echo ""
 
-# ── Optional bore tunnel (blocked networks: set ENABLE_BORE=0 or self-host BORE_SERVER) ──
+# Optional bore tunnel. Set ENABLE_BORE=1 to activate (default: 0 = off).
+# When disabled, expose with ngrok externally: ngrok http $PORT
 if bore_wanted; then
   BORE_TO=${BORE_SERVER:-bore.pub}
-  echo "Starting bore tunnel…"
-  echo "Relay: $BORE_TO — public URL appears below when connected."
+  echo "Starting bore tunnel..."
+  echo "  Relay: $BORE_TO -> local :$PORT"
+  bore local "$PORT" --to "$BORE_TO" &
+  BORE_PID=$!
+  echo "  bore PID: $BORE_PID  (set ENABLE_BORE=0 to disable)"
   echo ""
-  bore local "$PORT" --to "$BORE_TO" || {
-    echo "" >&2
-    echo "WARN: Bore tunnel to $BORE_TO failed (timeout or blocked). Running local server only on port $PORT." >&2
-    echo "      Map port $PORT from the host, use a VPN, set BORE_SERVER to your relay, or ENABLE_BORE=0 to skip this message." >&2
-    echo "" >&2
-  }
 else
-  echo "Bore tunnel disabled (ENABLE_BORE)."
+  echo "Bore tunnel disabled (ENABLE_BORE=0)."
+  echo "  Run ngrok externally: ngrok http $PORT"
   echo ""
 fi
 

@@ -45,7 +45,20 @@ app.get('/api/health', (_req, res) => {
 
 const clientDistPath = path.resolve(process.cwd(), 'dist', 'client');
 const indexHtmlPath = path.join(clientDistPath, 'index.html');
-app.use(express.static(clientDistPath));
+app.use(
+  express.static(clientDistPath, {
+    maxAge: '7d', // knights/, fonts/, logo, favicon → 7-day browser cache
+    setHeaders(res, filePath) {
+      // Vite outputs content-hashed filenames inside /assets/ → immutable forever
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (filePath.endsWith('index.html')) {
+        // SPA entry point must always be fresh so clients pick up new deploys
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    },
+  })
+);
 app.get('*', (_req, res) => {
   if (!fs.existsSync(indexHtmlPath)) {
     res.status(503).type('text/plain').send(

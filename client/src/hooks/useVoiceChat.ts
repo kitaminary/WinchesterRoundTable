@@ -14,10 +14,20 @@ interface UseVoiceChatReturn {
   disableMic: () => void;
 }
 
+// Optional TURN relay. Set VITE_TURN_URL (+ _USERNAME / _CREDENTIAL) in .env to enable.
+// Without TURN, peers behind strict NAT or mobile networks may fail to connect.
+// If VITE_TURN_URL is empty the connection falls back to STUN-only.
+const _TURN_URL = (import.meta.env.VITE_TURN_URL as string | undefined) || '';
+const _TURN_USERNAME = (import.meta.env.VITE_TURN_USERNAME as string | undefined) || '';
+const _TURN_CREDENTIAL = (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined) || '';
+
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    ...(_TURN_URL
+      ? [{ urls: _TURN_URL, username: _TURN_USERNAME, credential: _TURN_CREDENTIAL }]
+      : []),
   ],
 };
 
@@ -81,6 +91,11 @@ export function useVoiceChat(
           remoteAudioRef.current.set(targetUserId, audio);
         }
         audio.srcObject = event.streams[0];
+        // Browsers may block autoplay without a prior user gesture.
+        // Calling play() explicitly satisfies the policy where possible.
+        void audio.play().catch(() => {
+          // autoplay blocked — audio will start automatically after any user interaction
+        });
       };
 
       pc.onconnectionstatechange = () => {

@@ -21,7 +21,7 @@ services:
     build: .
     ports:
       - "${PORT:-3000}:3000"
-      - "4040:4040"   # ngrok admin UI
+      # 4040 removed: ngrok admin UI not used in this setup
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,7 +30,7 @@ services:
       DATABASE_URL: postgres://winchester:${POSTGRES_PASSWORD:-changeme}@postgres:5432/winchester
       CHAT_HISTORY_VERSION: ${CHAT_HISTORY_VERSION:-1}
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
-      ENABLE_BORE: ${ENABLE_BORE:-1}
+      ENABLE_BORE: ${ENABLE_BORE:-0}
       BORE_SERVER: ${BORE_SERVER:-bore.pub}
       NODE_ENV: production
     restart: unless-stopped
@@ -40,6 +40,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # ── ngrok tunnel ─────────────────────────────────────────────────────────────
+  # Starts automatically with `make up` when NGROK_AUTHTOKEN is set in .env.
+  # Public URL is printed in logs: make logs-ngrok
+  # Web inspector: http://localhost:4040
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: "no"
+    command: http winchester:3000 --log stdout
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      winchester:
+        condition: service_healthy
 
   # ── App (dev, hot reload) ────────────────────────────────────────────────────
   winchester-dev:

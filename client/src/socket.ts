@@ -53,7 +53,8 @@ const SOCKET_URL =
       : window.location.origin;
 
 export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOCKET_URL, {
-  autoConnect: false, // we connect manually after auth
+  autoConnect: false,        // we connect manually after auth
+  transports: ['websocket'], // skip HTTP polling upgrade; reduces ngrok request count
   reconnection: true,
   reconnectionAttempts: 10,
   reconnectionDelay: 1000,
