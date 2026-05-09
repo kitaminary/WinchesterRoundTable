@@ -46,6 +46,30 @@ export function KnightRoster({ users, currentUserId }: KnightRosterProps) {
           </div>
         ))}
 
+        {
+          [...Array(13 - users.length)].map((_, index) => (
+            <div
+              key="empty"
+              className="roster-item"
+              title="Empty seat"
+            >
+              <div className="roster-avatar">
+                <KnightAvatar avatarId={1} size="small" />
+                <div className="roster-speaking-dot" />
+              </div>
+              <div className="roster-info">
+                <span className="roster-name">
+                  Empty seat
+                </span>
+                <span className="sr-only">Empty seat</span>
+              </div>
+              <div className="roster-mic" aria-hidden>
+                <MicOff className="roster-mic-icon" />
+              </div>
+            </div>
+          ))
+        }
+
         {users.length === 0 && (
           <div className="roster-empty">
             <p>No knights have arrived yet</p>

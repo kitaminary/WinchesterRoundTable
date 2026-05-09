@@ -388,7 +388,12 @@ body {
 @media (max-width: 992px) {
 
   .sidebar:not(.sidebar-left) {
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   #root {
@@ -456,7 +461,9 @@ body {
 
   .chat-panel {
     border-radius: 8px;
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
   }
 
   .chat-messages {
@@ -1175,6 +1182,15 @@ body {
   cursor: default;
 }
 
+@media (max-width: 992px) {
+  .roster-list {
+    max-height: 100px;
+  }
+  .roster-item {
+    padding: 0.1rem 0.48rem;
+  }
+}
+
 .roster-item:hover {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -1247,8 +1263,7 @@ body {
 .chat-panel {
   display: flex;
   flex-direction: column;
-  min-height: 520px;
-  max-height: min(52vh, 520px);
+  flex: 1 1 100%;
   color-scheme: dark;
   background: linear-gradient(168deg,
       rgba(236, 226, 190, 0.1) 0%,
