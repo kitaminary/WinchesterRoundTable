@@ -1,7 +1,7 @@
 export const KNIGHT_PORTRAIT_COUNT = 24;
 
 /**
- * avatarId сервера — 0..12; файлы статики `/knights/knight1.png` … `knight13.png`.
+ * avatarId сервера — 0..KNIGHT_PORTRAIT_COUNT-1; статика `/knights/knight1.webp` … `knight{N}.webp`.
  */
 export function knightPortraitPath(avatarId: number): string {
   const normalized = Number.isFinite(avatarId)

@@ -1,6 +1,16 @@
+import { KNIGHT_AVATAR_ID_MAX } from './constants.js';
 import type { User, ChatMessage, RoomState } from './types.js';
 
-const MAX_SEATS = 24;
+// Maximum concurrent users in one session (in-memory only — the database has
+// no registration limit). Override with MAX_ROOM_SIZE env var; 0 = unlimited.
+const MAX_ROOM_SIZE = (() => {
+  const v = parseInt(process.env.MAX_ROOM_SIZE ?? '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 0; // 0 = unlimited
+})();
+
+// How many avatar portraits exist (0-based). Seats grow dynamically.
+const AVATAR_POOL = KNIGHT_AVATAR_ID_MAX + 1; // 24 portraits (0-23)
+
 const MAX_MESSAGES = 100;
 
 class RoomStateManager {
@@ -9,8 +19,9 @@ class RoomStateManager {
   private occupiedSeats: Set<number> = new Set();
   private usedAvatars: Set<number> = new Set();
 
+  /** Returns true only when MAX_ROOM_SIZE > 0 and the limit is reached. */
   isFull(): boolean {
-    return this.users.size >= MAX_SEATS;
+    return MAX_ROOM_SIZE > 0 && this.users.size >= MAX_ROOM_SIZE;
   }
 
   getUserCount(): number {
@@ -25,31 +36,28 @@ class RoomStateManager {
     return Array.from(this.users.values());
   }
 
+  /** Finds the lowest free seat index (unbounded, grows with user count). */
   private findFreeSeat(): number {
-    for (let i = 0; i < MAX_SEATS; i++) {
-      if (!this.occupiedSeats.has(i)) {
-        return i;
-      }
-    }
-    return -1;
+    let i = 0;
+    while (this.occupiedSeats.has(i)) i++;
+    return i;
   }
 
   private findFreeAvatar(preferredId?: number): number {
-    if (preferredId !== undefined && preferredId >= 0 && preferredId < MAX_SEATS) {
-      if (!this.usedAvatars.has(preferredId)) {
-        return preferredId;
-      }
+    if (
+      preferredId !== undefined &&
+      preferredId >= 0 &&
+      preferredId < AVATAR_POOL &&
+      !this.usedAvatars.has(preferredId)
+    ) {
+      return preferredId;
     }
-
-    const availableAvatars: number[] = [];
-    for (let i = 0; i < MAX_SEATS; i++) {
-      if (!this.usedAvatars.has(i)) {
-        availableAvatars.push(i);
-      }
+    // Pick any unused portrait; wrap around if all are taken.
+    for (let i = 0; i < AVATAR_POOL; i++) {
+      if (!this.usedAvatars.has(i)) return i;
     }
-    if (availableAvatars.length === 0) return 0;
-    const randomIndex = Math.floor(Math.random() * availableAvatars.length);
-    return availableAvatars[randomIndex];
+    // All portraits in use - assign a random one (visual collision, still works).
+    return Math.floor(Math.random() * AVATAR_POOL);
   }
 
   addUser(userId: string, knightName: string, preferredAvatarId?: number): { user: User } | null {
@@ -58,10 +66,6 @@ class RoomStateManager {
     }
 
     const seatIndex = this.findFreeSeat();
-    if (seatIndex === -1) {
-      return null;
-    }
-
     const avatarId = this.findFreeAvatar(preferredAvatarId);
 
     const user: User = {

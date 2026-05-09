@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { KNIGHT_AVATAR_ID_MAX } from './constants.js';
 import { Winchester } from './db.js';
 
 export const authRouter = Router();
@@ -25,7 +26,13 @@ function validatePassword(p: unknown): string | null {
 
 function validateAvatarId(a: unknown): number {
   if (typeof a !== 'number' || !Number.isInteger(a)) return 0;
-  return Math.min(12, Math.max(0, a));
+  return Math.min(KNIGHT_AVATAR_ID_MAX, Math.max(0, a));
+}
+
+function extractBearerToken(req: import('express').Request): string | null {
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return null;
 }
 
 // POST /api/auth/register
@@ -43,20 +50,25 @@ authRouter.post('/register', async (req, res) => {
     return;
   }
 
-  const existing = Winchester.findUserByUsername(username);
-  if (existing) {
-    res.status(409).json({ error: 'That name is already taken at the Round Table.' });
-    return;
+  try {
+    const existing = await Winchester.findUserByUsername(username);
+    if (existing) {
+      res.status(409).json({ error: 'That name is already taken at the Round Table.' });
+      return;
+    }
+
+    const passHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = await Winchester.createUser(username, passHash, avatarId);
+    const token = await Winchester.createSession(user.id);
+
+    res.status(201).json({
+      token,
+      user: { id: user.id, username: user.username, avatarId: user.avatar_id },
+    });
+  } catch (err) {
+    console.error('[auth] register error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
   }
-
-  const passHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-  const user = Winchester.createUser(username, passHash, avatarId);
-  const token = Winchester.createSession(user.id);
-
-  res.status(201).json({
-    token,
-    user: { id: user.id, username: user.username, avatarId: user.avatar_id },
-  });
 });
 
 // POST /api/auth/login
@@ -69,49 +81,58 @@ authRouter.post('/login', async (req, res) => {
     return;
   }
 
-  const dbUser = Winchester.findUserByUsername(username);
-  if (!dbUser) {
-    res.status(401).json({ error: 'Unknown knight. Check your name and password.' });
-    return;
-  }
+  try {
+    const dbUser = await Winchester.findUserByUsername(username);
+    if (!dbUser) {
+      res.status(401).json({ error: 'Unknown knight. Check your name and password.' });
+      return;
+    }
 
-  const match = await bcrypt.compare(password, dbUser.pass_hash);
-  if (!match) {
-    res.status(401).json({ error: 'Wrong password, Sir Knight.' });
-    return;
-  }
+    const match = await bcrypt.compare(password, dbUser.pass_hash);
+    if (!match) {
+      res.status(401).json({ error: 'Wrong password, Sir Knight.' });
+      return;
+    }
 
-  const token = Winchester.createSession(dbUser.id);
-  res.json({
-    token,
-    user: { id: dbUser.id, username: dbUser.username, avatarId: dbUser.avatar_id },
-  });
+    const token = await Winchester.createSession(dbUser.id);
+    res.json({
+      token,
+      user: { id: dbUser.id, username: dbUser.username, avatarId: dbUser.avatar_id },
+    });
+  } catch (err) {
+    console.error('[auth] login error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
 });
 
 // POST /api/auth/logout
-authRouter.post('/logout', (req, res) => {
+authRouter.post('/logout', async (req, res) => {
   const token = extractBearerToken(req);
-  if (token) Winchester.deleteSession(token);
-  res.json({ ok: true });
+  try {
+    if (token) await Winchester.deleteSession(token);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth] logout error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
 });
 
 // GET /api/auth/me
-authRouter.get('/me', (req, res) => {
+authRouter.get('/me', async (req, res) => {
   const token = extractBearerToken(req);
   if (!token) {
     res.status(401).json({ error: 'No session token.' });
     return;
   }
-  const dbUser = Winchester.validateSession(token);
-  if (!dbUser) {
-    res.status(401).json({ error: 'Session expired or invalid.' });
-    return;
+  try {
+    const dbUser = await Winchester.validateSession(token);
+    if (!dbUser) {
+      res.status(401).json({ error: 'Session expired or invalid.' });
+      return;
+    }
+    res.json({ user: { id: dbUser.id, username: dbUser.username, avatarId: dbUser.avatar_id } });
+  } catch (err) {
+    console.error('[auth] me error:', err);
+    res.status(500).json({ error: 'Internal server error.' });
   }
-  res.json({ user: { id: dbUser.id, username: dbUser.username, avatarId: dbUser.avatar_id } });
 });
-
-function extractBearerToken(req: import('express').Request): string | null {
-  const auth = req.headers.authorization;
-  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
-  return null;
-}

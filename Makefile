@@ -1,32 +1,35 @@
 # Winchester Round Table — Makefile
 # Usage: make <target>
 
-.PHONY: help docker-check build build-dev up up-dev down restart logs logs-dev shell clean dev
+.PHONY: help docker-check build build-dev up up-dev down restart logs logs-dev \
+        shell db-shell db-list-users clean dev
 
 # ── Config ────────────────────────────────────────────────────────────────────
-COMPOSE = docker compose
-SERVICE = winchester
+COMPOSE  = docker compose
+SERVICE  = winchester
+POSTGRES = postgres
 
 # ── Help (default) ────────────────────────────────────────────────────────────
 help:
 	@echo ""
-	@echo "  Winchester Round Table — Docker commands"
+	@echo "  Winchester Round Table — commands"
 	@echo ""
-	@echo "  make build      Build the Docker image"
-	@echo "  make up         Start prod stack in background (build if needed)"
-	@echo "  make up-dev     Dev stack: Vite HMR + tsx watch (see Makefile for URL)"
-	@echo "  make down       Stop and remove containers"
-	@echo "  make restart    Restart the prod service"
-	@echo "  make logs       Follow prod logs"
-	@echo "  make logs-dev   Follow dev container logs"
-	@echo "  make build-dev  Build the dev image only"
-	@echo "  make shell      Open a shell inside the running prod container"
-	@echo "  make clean      Remove containers, images, and volumes"
-	@echo "  make dev        Run locally without Docker (npm run dev)"
+	@echo "  make build          Build the app Docker image"
+	@echo "  make up             Start prod stack (app + postgres) in background"
+	@echo "  make up-dev         Dev stack: Vite HMR + tsx watch"
+	@echo "  make down           Stop and remove containers"
+	@echo "  make restart        Restart the prod app service"
+	@echo "  make logs           Follow prod app logs"
+	@echo "  make logs-dev       Follow dev container logs"
+	@echo "  make build-dev      Build the dev image only"
+	@echo "  make shell          Shell inside running prod app container"
+	@echo "  make db-shell       psql shell inside postgres container"
+	@echo "  make db-list-users  List all registered knights"
+	@echo "  make clean          Remove containers, images, and volumes"
+	@echo "  make dev            Run locally without Docker (needs local postgres)"
 	@echo ""
 
-# ── Docker targets ────────────────────────────────────────────────────────────
-# Fails fast when Docker Desktop (or another engine) is not running — avoids cryptic pipe errors.
+# ── Docker checks ─────────────────────────────────────────────────────────────
 docker-check:
 	@docker info >/dev/null 2>&1 || { \
 		printf '%s\n' \
@@ -36,6 +39,7 @@ docker-check:
 		exit 1; \
 	}
 
+# ── Docker targets ─────────────────────────────────────────────────────────────
 build: docker-check
 	$(COMPOSE) build $(SERVICE)
 
@@ -43,10 +47,10 @@ build-dev: docker-check
 	$(COMPOSE) --profile dev build winchester-dev
 
 up: docker-check
-	$(COMPOSE) up -d --build $(SERVICE)
+	$(COMPOSE) up -d --build $(SERVICE) $(POSTGRES)
 
 up-dev: docker-check
-	$(COMPOSE) --profile dev up --build winchester-dev
+	$(COMPOSE) --profile dev up --build winchester-dev $(POSTGRES)
 
 down: docker-check
 	$(COMPOSE) down
@@ -62,6 +66,12 @@ logs-dev: docker-check
 
 shell: docker-check
 	$(COMPOSE) exec $(SERVICE) sh
+
+db-shell: docker-check
+	$(COMPOSE) exec $(POSTGRES) psql -U winchester -d winchester
+
+db-list-users: docker-check
+	$(COMPOSE) exec $(SERVICE) node dist/server/../../../scripts/list-users.mjs
 
 clean: docker-check
 	$(COMPOSE) down --rmi all --volumes --remove-orphans

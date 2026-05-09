@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -5,7 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { roomState } from './roomState.js';
-import { Winchester } from './db.js';
+import { initDb, Winchester } from './db.js';
 import { authRouter } from './auth.js';
 import type {
   ServerToClientEvents,
@@ -20,6 +21,11 @@ import type {
 
 const CHAT_VERSION = process.env.CHAT_HISTORY_VERSION ?? '1';
 
+// ── Bootstrap ────────────────────────────────────────────────────────────────
+// Run DB migrations and housekeeping before accepting connections.
+await initDb();
+
+// ── Express + Socket.IO ───────────────────────────────────────────────────────
 const app = express();
 const httpServer = createServer(app);
 
@@ -30,7 +36,7 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
-// ---------- REST routes ----------
+// ── REST routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth', authRouter);
 
 app.get('/api/health', (_req, res) => {
@@ -43,31 +49,37 @@ app.use(express.static(clientDistPath));
 app.get('*', (_req, res) => {
   if (!fs.existsSync(indexHtmlPath)) {
     res.status(503).type('text/plain').send(
-      'Client bundle not found. Run npm run build first.'
+      'Client bundle not found. Run npm run build first.',
     );
     return;
   }
   res.sendFile(indexHtmlPath);
 });
 
-// ---------- Socket.io auth middleware ----------
-io.use((socket, next) => {
+// ── Socket.IO auth middleware ─────────────────────────────────────────────────
+io.use(async (socket, next) => {
   const token = (socket.handshake.auth as Record<string, unknown>)?.token;
   if (typeof token !== 'string' || !token.trim()) {
     socket.data.authenticated = false;
     return next();
   }
-  const dbUser = Winchester.validateSession(token.trim());
-  if (!dbUser) {
+  try {
+    const dbUser = await Winchester.validateSession(token.trim());
+    if (!dbUser) {
+      socket.data.authenticated = false;
+    } else {
+      socket.data.authenticated = true;
+      socket.data.dbUser = dbUser;
+    }
+    next();
+  } catch (err) {
+    console.error('[Socket] Auth middleware error:', err);
     socket.data.authenticated = false;
-  } else {
-    socket.data.authenticated = true;
-    socket.data.dbUser = dbUser;
+    next();
   }
-  next();
 });
 
-// ---------- Socket.io handlers ----------
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function isValidString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
@@ -75,10 +87,26 @@ function isValidBoolean(v: unknown): v is boolean {
   return typeof v === 'boolean';
 }
 
+async function getPersistedHistory() {
+  const dbRows = await Winchester.getMessages(CHAT_VERSION, 100);
+  return dbRows.map((row) => ({
+    id: row.id,
+    type: 'user' as const,
+    userId: row.user_id ?? undefined,
+    knightName: row.username ?? undefined,
+    avatarId: row.avatar_id ?? undefined,
+    text: row.text,
+    timestamp: row.timestamp,
+    replyToUserId: row.reply_to_user_id ?? undefined,
+    replyToKnightName: row.reply_to_knight_name ?? undefined,
+  }));
+}
+
+// ── Socket.IO event handlers ──────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`[Socket] Connected: ${socket.id} | auth: ${socket.data.authenticated ?? false}`);
 
-  socket.on('join_room', () => {
+  socket.on('join_room', async () => {
     if (!socket.data.authenticated || !socket.data.dbUser) {
       socket.emit('join_error', { message: 'auth_required' });
       return;
@@ -86,12 +114,16 @@ io.on('connection', (socket) => {
 
     const alreadySeated = roomState.getUser(socket.id);
     if (alreadySeated) {
-      // Resend current state with persisted history
-      const history = getPersistedHistory();
-      socket.emit('join_success', {
-        currentUser: alreadySeated,
-        roomState: { ...roomState.getState(), messages: history },
-      });
+      try {
+        const history = await getPersistedHistory();
+        socket.emit('join_success', {
+          currentUser: alreadySeated,
+          roomState: { ...roomState.getState(), messages: history },
+        });
+      } catch (err) {
+        console.error('[join_room] history fetch error:', err);
+        socket.emit('join_error', { message: 'internal_error' });
+      }
       return;
     }
 
@@ -108,19 +140,27 @@ io.on('connection', (socket) => {
     }
 
     const { user } = joinResult;
-    const history = getPersistedHistory();
 
-    socket.emit('join_success', {
-      currentUser: user,
-      roomState: { ...roomState.getState(), messages: history },
-    });
+    try {
+      const history = await getPersistedHistory();
+      socket.emit('join_success', {
+        currentUser: user,
+        roomState: { ...roomState.getState(), messages: history },
+      });
+    } catch (err) {
+      console.error('[join_room] history fetch error:', err);
+      socket.emit('join_success', {
+        currentUser: user,
+        roomState: { ...roomState.getState(), messages: [] },
+      });
+    }
+
     socket.broadcast.emit('user_joined', user);
     socket.broadcast.emit('room_notice', { kind: 'user_joined', knightName: user.knightName });
-
     console.log(`[Room] ${user.knightName} joined (seat ${user.seatIndex}, avatar ${user.avatarId})`);
   });
 
-  socket.on('chat_message', (payload: ChatMessagePayload) => {
+  socket.on('chat_message', async (payload: ChatMessagePayload) => {
     if (!isValidString(payload?.text)) return;
 
     const replyId =
@@ -129,21 +169,23 @@ io.on('connection', (socket) => {
         : undefined;
 
     const message = roomState.addChatMessage(socket.id, payload.text, replyId);
-    if (message) {
-      // Persist to DB
-      Winchester.saveMessage({
-        id: message.id,
-        userId: message.userId ?? null,
-        username: message.knightName ?? null,
-        avatarId: message.avatarId ?? null,
-        text: message.text,
-        replyToUserId: message.replyToUserId,
-        replyToKnightName: message.replyToKnightName,
-        timestamp: message.timestamp,
-        version: CHAT_VERSION,
-      });
-      io.emit('chat_message', message);
-    }
+    if (!message) return;
+
+    // Broadcast immediately — don't wait for DB write.
+    io.emit('chat_message', message);
+
+    // Persist asynchronously; log but don't crash on failure.
+    Winchester.saveMessage({
+      id: message.id,
+      userId: message.userId ?? null,
+      username: message.knightName ?? null,
+      avatarId: message.avatarId ?? null,
+      text: message.text,
+      replyToUserId: message.replyToUserId,
+      replyToKnightName: message.replyToKnightName,
+      timestamp: message.timestamp,
+      version: CHAT_VERSION,
+    }).catch((err) => console.error('[chat_message] persist error:', err));
   });
 
   socket.on('mic_status', (payload: MicStatusPayload) => {
@@ -209,22 +251,7 @@ io.on('connection', (socket) => {
   });
 });
 
-function getPersistedHistory() {
-  const dbRows = Winchester.getMessages(CHAT_VERSION, 100);
-  return dbRows.map((row) => ({
-    id: row.id,
-    type: 'user' as const,
-    userId: row.user_id ?? undefined,
-    knightName: row.username ?? undefined,
-    avatarId: row.avatar_id ?? undefined,
-    text: row.text,
-    timestamp: row.timestamp,
-    replyToUserId: row.reply_to_user_id ?? undefined,
-    replyToKnightName: row.reply_to_knight_name ?? undefined,
-  }));
-}
-
-// ---------- Start ----------
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = '0.0.0.0';
 
@@ -233,6 +260,7 @@ httpServer.listen(PORT, HOST, () => {
   console.log('Winchester Round Table — server');
   console.log(`  Local:        http://localhost:${PORT}`);
   console.log(`  Chat version: ${CHAT_VERSION}`);
+  console.log(`  Database:     PostgreSQL (${process.env.DATABASE_URL ? 'via DATABASE_URL' : 'via PG* env vars'})`);
   console.log(`  Bundle:       ${fs.existsSync(indexHtmlPath) ? 'ok' : 'missing (run npm run build)'}`);
   console.log('');
 });

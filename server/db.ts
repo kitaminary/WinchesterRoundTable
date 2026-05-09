@@ -1,52 +1,33 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import pg from 'pg';
 import { randomUUID } from 'crypto';
+import { runMigrations } from './migrate.js';
 
-const DATA_DIR = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+const { Pool } = pg;
+
+// ── Connection pool ──────────────────────────────────────────────────────────
+// Reads DATABASE_URL from the environment (set via .env or Docker).
+// Falls back to individual PG* vars (standard pg driver convention).
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Sane production defaults:
+  max: 10,               // max concurrent connections
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+});
+
+pool.on('error', (err) => {
+  console.error('[DB] Unexpected pool error:', err.message);
+});
+
+// Run migrations once on startup, then export the ready pool.
+export async function initDb(): Promise<void> {
+  // Prune expired sessions as part of startup housekeeping.
+  await runMigrations(pool);
+  await pool.query('DELETE FROM sessions WHERE expires_at < $1', [Date.now()]);
+  console.log('[DB] Startup housekeeping done');
 }
 
-const db = new Database(path.join(DATA_DIR, 'winchester.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id          TEXT PRIMARY KEY,
-    username    TEXT UNIQUE NOT NULL COLLATE NOCASE,
-    pass_hash   TEXT NOT NULL,
-    avatar_id   INTEGER NOT NULL DEFAULT 0,
-    created_at  INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token       TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at  INTEGER NOT NULL,
-    expires_at  INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS chat_messages (
-    id                   TEXT PRIMARY KEY,
-    user_id              TEXT,
-    username             TEXT,
-    avatar_id            INTEGER,
-    text                 TEXT NOT NULL,
-    reply_to_user_id     TEXT,
-    reply_to_knight_name TEXT,
-    timestamp            INTEGER NOT NULL,
-    version              TEXT NOT NULL DEFAULT '1'
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-  CREATE INDEX IF NOT EXISTS idx_messages_version_ts ON chat_messages(version, timestamp);
-`);
-
-// Prune expired sessions at boot
-db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
-
+// ── Types ────────────────────────────────────────────────────────────────────
 export interface DbUser {
   id: string;
   username: string;
@@ -67,55 +48,93 @@ export interface DbMessage {
   version: string;
 }
 
+// ── Helper ────────────────────────────────────────────────────────────────────
+// pg returns BIGINT columns as strings by default. We store timestamps as
+// millisecond-epoch integers (BIGINT), so we cast them back here.
+function toUser(row: Record<string, unknown>): DbUser {
+  return {
+    id: row.id as string,
+    username: row.username as string,
+    pass_hash: row.pass_hash as string,
+    avatar_id: row.avatar_id as number,
+    created_at: Number(row.created_at),
+  };
+}
+
+function toMessage(row: Record<string, unknown>): DbMessage {
+  return {
+    id: row.id as string,
+    user_id: (row.user_id as string | null) ?? null,
+    username: (row.username as string | null) ?? null,
+    avatar_id: row.avatar_id != null ? (row.avatar_id as number) : null,
+    text: row.text as string,
+    reply_to_user_id: (row.reply_to_user_id as string | null) ?? null,
+    reply_to_knight_name: (row.reply_to_knight_name as string | null) ?? null,
+    timestamp: Number(row.timestamp),
+    version: row.version as string,
+  };
+}
+
+// ── Data-access layer ────────────────────────────────────────────────────────
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 export const Winchester = {
-  // ---------- users ----------
-  createUser(username: string, passHash: string, avatarId: number): DbUser {
+  // ── users ──────────────────────────────────────────────────────────────────
+  async createUser(username: string, passHash: string, avatarId: number): Promise<DbUser> {
     const id = randomUUID();
     const now = Date.now();
-    db.prepare(
-      'INSERT INTO users (id, username, pass_hash, avatar_id, created_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, username, passHash, avatarId, now);
+    await pool.query(
+      `INSERT INTO users (id, username, pass_hash, avatar_id, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [id, username, passHash, avatarId, now],
+    );
     return { id, username, pass_hash: passHash, avatar_id: avatarId, created_at: now };
   },
 
-  findUserByUsername(username: string): DbUser | undefined {
-    return db
-      .prepare<[string], DbUser>('SELECT * FROM users WHERE username = ? COLLATE NOCASE')
-      .get(username) as DbUser | undefined;
+  async findUserByUsername(username: string): Promise<DbUser | null> {
+    // CITEXT column makes this comparison case-insensitive automatically.
+    const { rows } = await pool.query(
+      `SELECT * FROM users WHERE username = $1`,
+      [username],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
   },
 
-  findUserById(id: string): DbUser | undefined {
-    return db.prepare<[string], DbUser>('SELECT * FROM users WHERE id = ?').get(id) as DbUser | undefined;
+  async findUserById(id: string): Promise<DbUser | null> {
+    const { rows } = await pool.query(
+      `SELECT * FROM users WHERE id = $1`,
+      [id],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
   },
 
-  // ---------- sessions ----------
-  createSession(userId: string): string {
+  // ── sessions ──────────────────────────────────────────────────────────────
+  async createSession(userId: string): Promise<string> {
     const token = randomUUID();
     const now = Date.now();
-    db.prepare(
-      'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
-    ).run(token, userId, now, now + SESSION_TTL_MS);
+    await pool.query(
+      `INSERT INTO sessions (token, user_id, created_at, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [token, userId, now, now + SESSION_TTL_MS],
+    );
     return token;
   },
 
-  validateSession(token: string): DbUser | null {
-    const row = db
-      .prepare<[string, number], { user_id: string }>(
-        'SELECT user_id FROM sessions WHERE token = ? AND expires_at > ?'
-      )
-      .get(token, Date.now()) as { user_id: string } | undefined;
-    if (!row) return null;
-    return this.findUserById(row.user_id) ?? null;
+  async validateSession(token: string): Promise<DbUser | null> {
+    const { rows } = await pool.query<{ user_id: string }>(
+      `SELECT user_id FROM sessions WHERE token = $1 AND expires_at > $2`,
+      [token, Date.now()],
+    );
+    if (!rows[0]) return null;
+    return this.findUserById(rows[0].user_id);
   },
 
-  deleteSession(token: string): void {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  async deleteSession(token: string): Promise<void> {
+    await pool.query(`DELETE FROM sessions WHERE token = $1`, [token]);
   },
 
-  // ---------- messages ----------
-  saveMessage(msg: {
+  // ── messages ───────────────────────────────────────────────────────────────
+  async saveMessage(msg: {
     id: string;
     userId: string | null;
     username: string | null;
@@ -125,31 +144,36 @@ export const Winchester = {
     replyToKnightName?: string;
     timestamp: number;
     version: string;
-  }): void {
-    db.prepare(
-      `INSERT OR IGNORE INTO chat_messages
-         (id, user_id, username, avatar_id, text, reply_to_user_id, reply_to_knight_name, timestamp, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      msg.id,
-      msg.userId ?? null,
-      msg.username ?? null,
-      msg.avatarId ?? null,
-      msg.text,
-      msg.replyToUserId ?? null,
-      msg.replyToKnightName ?? null,
-      msg.timestamp,
-      msg.version
+  }): Promise<void> {
+    await pool.query(
+      `INSERT INTO chat_messages
+         (id, user_id, username, avatar_id, text,
+          reply_to_user_id, reply_to_knight_name, timestamp, version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        msg.id,
+        msg.userId ?? null,
+        msg.username ?? null,
+        msg.avatarId ?? null,
+        msg.text,
+        msg.replyToUserId ?? null,
+        msg.replyToKnightName ?? null,
+        msg.timestamp,
+        msg.version,
+      ],
     );
   },
 
-  getMessages(version: string, limit = 100): DbMessage[] {
-    return db
-      .prepare<[string, number], DbMessage>(
-        `SELECT * FROM chat_messages WHERE version = ?
-         ORDER BY timestamp ASC LIMIT ?`
-      )
-      .all(version, limit) as DbMessage[];
+  async getMessages(version: string, limit = 100): Promise<DbMessage[]> {
+    const { rows } = await pool.query(
+      `SELECT * FROM chat_messages
+       WHERE version = $1
+       ORDER BY timestamp ASC
+       LIMIT $2`,
+      [version, limit],
+    );
+    return rows.map(toMessage);
   },
 };
 

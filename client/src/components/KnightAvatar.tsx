@@ -17,10 +17,7 @@ export function KnightAvatar({ avatarId, isEmpty = false, size = 'medium' }: Kni
     );
   }
 
-  const safeId = Number.isFinite(avatarId)
-    ? Math.min(12, Math.max(0, Math.floor(avatarId)))
-    : 0;
-  const src = knightPortraitPath(safeId);
+  const src = knightPortraitPath(avatarId);
 
   return (
     <div className={`knight-portrait-frame ${size}`}>

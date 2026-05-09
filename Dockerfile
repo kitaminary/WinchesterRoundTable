@@ -1,12 +1,14 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
-# Required for building native modules (better-sqlite3)
-RUN apk add --no-cache python3 make g++
-
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --include=dev
+
+# Copy only package.json — NOT package-lock.json.
+# package-lock.json generated on Windows/Mac omits linux-musl optional deps
+# (e.g. @rollup/rollup-linux-x64-musl), causing Vite build failures in Alpine.
+# npm install resolves the correct platform deps from scratch.
+COPY package.json ./
+RUN npm install --include=dev
 
 COPY . .
 RUN npm run build
@@ -14,9 +16,10 @@ RUN npm run build
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:20-alpine AS runtime
 
-RUN apk add --no-cache python3 make g++ curl
+# curl for healthcheck; bore for optional tunnel
+RUN apk add --no-cache curl
 
-# Pin bore version: /releases/latest/download/ only works if the filename exists on the latest tag.
+# Pin bore version
 RUN curl -fL https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz \
     -o /tmp/bore.tar.gz && \
     tar xzf /tmp/bore.tar.gz -C /usr/local/bin/ && \
@@ -24,19 +27,15 @@ RUN curl -fL https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.
 
 WORKDIR /app
 
-# Only production deps (rebuild native modules for runtime arch)
-COPY package*.json ./
-RUN npm ci --omit=dev
+# Production deps only (pg is pure JS — no native compilation)
+COPY package.json ./
+RUN npm install --omit=dev
 
 # Copy built artifacts
 COPY --from=builder /app/dist ./dist
 
-# Data volume mount point for SQLite
-RUN mkdir -p /app/data
-
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV DATA_DIR=/app/data
 
 EXPOSE 3000
 
