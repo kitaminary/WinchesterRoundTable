@@ -356,22 +356,12 @@ body {
 }
 
 .room-main {
-  max-width: 1480px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: 1fr 2.5fr 1.5fr;
-  gap: 1.5rem;
-  align-items: start;
-}
-
-@media (max-width: 1024px) {
-  .room-main {
-    grid-template-columns: 1fr;
-    max-width: 720px;
-  }
+  display: flex;
+  justify-content: space-between;
 }
 
 .table-section {
+  position: absolute;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -387,9 +377,11 @@ body {
   gap: 0.5rem;
 }
 
-@media (max-width: 1024px) {
-  .sidebar {
-    flex-direction: column-reverse;
+@media (max-width: 992px) {
+  .room-main {
+    flex-direction: column;
+    width: 100%;
+    gap: 1rem;
   }
 }
 
@@ -424,8 +416,7 @@ body {
   transform: rotateX(54deg) rotateZ(-1deg) translateY(8%) scale(1);
   transform-origin: 50% 58%;
   filter:
-    drop-shadow(0 28px 40px rgba(0, 0, 0, 0.55))
-    drop-shadow(0 6px 0 rgba(0, 0, 0, 0.18));
+    drop-shadow(0 28px 40px rgba(0, 0, 0, 0.55)) drop-shadow(0 6px 0 rgba(0, 0, 0, 0.18));
 }
 
 .seat-overlay-layer.seats-ring {
