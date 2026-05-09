@@ -1,3 +1,5 @@
+I was vibecoded this shit just for fun
+
 # Winchester Round Table
 
 Internal flood-room app for teams: Winchester-themed round table (**13 seats**), realtime text (**Socket.IO**), and optional mesh voice (**WebRTC** + signaling over Socket.IO), with microphone and speaking indicators.
