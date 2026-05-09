@@ -25,9 +25,9 @@ export interface RoomState {
   messages: ChatMessage[];
 }
 
+/** join_room no longer needs a payload — identity comes from socket auth token. */
 export interface JoinRoomPayload {
-  knightName: string;
-  preferredAvatarId?: number;
+  _?: never;
 }
 
 export interface ChatMessagePayload {
@@ -92,7 +92,7 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  join_room: (payload: JoinRoomPayload) => void;
+  join_room: () => void;
   chat_message: (payload: ChatMessagePayload) => void;
   mic_status: (payload: MicStatusPayload) => void;
   speaking_status: (payload: SpeakingStatusPayload) => void;

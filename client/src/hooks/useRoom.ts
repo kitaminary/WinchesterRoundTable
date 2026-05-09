@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { socket, getSocketId } from '../socket';
+import { socket } from '../socket';
 import type {
   User,
   ChatMessage,
@@ -8,17 +8,7 @@ import type {
   SendChatOptions,
   ChatMessagePayload,
   SeatSpeechBubbleState,
-  JoinRoomPayload,
 } from '../types';
-import {
-  clearSavedKnightName,
-  getSavedKnightNameTrimmed,
-  setSavedKnightName,
-  shouldClearSessionOnJoinError,
-  getSavedAvatarId,
-  setSavedAvatarId,
-  clearSavedAvatarId,
-} from '../lib/knightSession';
 
 interface UseRoomReturn {
   status: ConnectionStatus;
@@ -29,87 +19,46 @@ interface UseRoomReturn {
   socketConnected: boolean;
   joinPending: boolean;
   activityNotice: string | null;
-  defaultEntryName: string;
-  joinRoom: (knightName: string) => void;
+  joinRoom: () => void;
   sendMessage: (text: string, options?: SendChatOptions) => void;
   updateMicStatus: (enabled: boolean) => void;
   updateSpeakingStatus: (isSpeaking: boolean) => void;
-  cancelSessionRestore: () => void;
-  retryRestoreConnection: () => void;
   leaveTable: () => void;
   retryAfterRoomFull: () => void;
   seatSpeechBubbles: Record<string, SeatSpeechBubbleState>;
 }
 
-function filterUserFeedMessages(list: ChatMessage[]): ChatMessage[] {
-  return list.filter((m) => m.type === 'user');
-}
+const SPEECH_BUBBLE_TTL = 8000;
 
-function appendMessageUnique(prev: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  if (message.type !== 'user') {
-    return prev;
-  }
-  if (prev.some((m) => m.id === message.id)) {
-    return prev;
-  }
+function appendUnique(prev: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  if (message.type !== 'user') return prev;
+  if (prev.some((m) => m.id === message.id)) return prev;
   return [...prev.slice(-99), message];
 }
 
-function clearSeatSpeechBubbleTimers(ref: {
-  current: Map<string, ReturnType<typeof setTimeout>>;
-}) {
-  ref.current.forEach((t) => clearTimeout(t));
-  ref.current.clear();
-}
-
-function initialSavedKnightRef(): string | null {
-  if (typeof window === 'undefined') return null;
-  return getSavedKnightNameTrimmed();
-}
-
 export function useRoom(): UseRoomReturn {
-  const initialSaved = initialSavedKnightRef();
-
-  const [status, setStatus] = useState<ConnectionStatus>(() => {
-    if (typeof window === 'undefined') return 'connecting';
-    if (initialSaved) return 'restoring';
-    return socket.connected ? 'connected' : 'connecting';
-  });
+  const [status, setStatus] = useState<ConnectionStatus>(
+    socket.connected ? 'connected' : 'connecting'
+  );
   const [users, setUsers] = useState<User[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [joinedSelf, setJoinedSelf] = useState<User | null>(null);
-  const [joinPending, setJoinPending] = useState(() => Boolean(initialSaved));
+  const [joinPending, setJoinPending] = useState(false);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [activityNotice, setActivityNotice] = useState<string | null>(null);
-  const [defaultEntryName, setDefaultEntryName] = useState(
-    () => getSavedKnightNameTrimmed() ?? ''
-  );
-  const [seatSpeechBubbles, setSeatSpeechBubbles] = useState<
-    Record<string, SeatSpeechBubbleState>
-  >({});
+  const [seatSpeechBubbles, setSeatSpeechBubbles] = useState<Record<string, SeatSpeechBubbleState>>({});
 
-  const pendingNameRef = useRef<string | null>(initialSaved);
-  const joinPendingRef = useRef(Boolean(initialSaved));
-  const statusRef = useRef(status);
   const selfIdRef = useRef<string | null>(null);
-  const activityNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seatSpeechBubbleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bubbleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const joinPendingRef = useRef(false);
 
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
-
-  useEffect(() => {
-    joinPendingRef.current = joinPending;
-  }, [joinPending]);
-
-  useEffect(() => {
-    selfIdRef.current = joinedSelf?.id ?? null;
-  }, [joinedSelf?.id]);
+  useEffect(() => { selfIdRef.current = joinedSelf?.id ?? null; }, [joinedSelf?.id]);
+  useEffect(() => { joinPendingRef.current = joinPending; }, [joinPending]);
 
   const currentUser = useMemo(() => {
-    const id = joinedSelf?.id ?? getSocketId() ?? null;
+    const id = joinedSelf?.id ?? null;
     if (!id) return null;
     return users.find((u) => u.id === id) ?? joinedSelf ?? null;
   }, [joinedSelf, users]);
@@ -118,202 +67,108 @@ export function useRoom(): UseRoomReturn {
     const line =
       payload.kind === 'user_joined'
         ? `${payload.knightName} entered the chamber`
-        : `${payload.knightName} departed`;
-    if (activityNoticeTimerRef.current) {
-      clearTimeout(activityNoticeTimerRef.current);
-    }
+        : `${payload.knightName} left the table`;
     setActivityNotice(line);
-    activityNoticeTimerRef.current = setTimeout(() => {
-      setActivityNotice(null);
-      activityNoticeTimerRef.current = null;
-    }, 5200);
+    if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
+    activityTimerRef.current = setTimeout(() => setActivityNotice(null), 4500);
+  }, []);
+
+  const pushSpeechBubble = useCallback((msg: ChatMessage) => {
+    if (!msg.userId) return;
+    const id = msg.userId;
+    setSeatSpeechBubbles((prev) => ({
+      ...prev,
+      [id]: { text: msg.text, replyToKnightName: msg.replyToKnightName, sourceMessageId: msg.id },
+    }));
+    const existing = bubbleTimersRef.current.get(id);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      setSeatSpeechBubbles((prev) => {
+        const next = { ...prev };
+        if (next[id]?.sourceMessageId === msg.id) delete next[id];
+        return next;
+      });
+      bubbleTimersRef.current.delete(id);
+    }, SPEECH_BUBBLE_TTL);
+    bubbleTimersRef.current.set(id, t);
   }, []);
 
   useEffect(() => {
-    const handleSocketConnect = () => {
+    const handleConnect = () => {
       setSocketConnected(true);
-      const resume = pendingNameRef.current;
-      if (
-        resume &&
-        joinPendingRef.current &&
-        statusRef.current !== 'in_room' &&
-        statusRef.current !== 'room_full'
-      ) {
-        setError(null);
-        const preferredAvatarId = getSavedAvatarId();
-        const payload: JoinRoomPayload = { knightName: resume };
-        if (preferredAvatarId !== null) {
-          payload.preferredAvatarId = preferredAvatarId;
-        }
-        socket.emit('join_room', payload);
-      } else if (statusRef.current === 'disconnected') {
-        setStatus('connected');
-      } else if (statusRef.current === 'connecting' && resume === null) {
-        setStatus('connected');
+      setError(null);
+      if (status !== 'in_room') setStatus('connected');
+
+      // Auto-join if we have auth and were pending
+      if (joinPendingRef.current) {
+        socket.emit('join_room');
       }
     };
 
-    const handleSocketDisconnect = (reason: string) => {
-      void reason;
+    const handleDisconnect = () => {
       setSocketConnected(false);
-      setJoinedSelf(null);
-      selfIdRef.current = null;
-      pendingNameRef.current = null;
-      joinPendingRef.current = false;
-      setJoinPending(false);
-      setUsers([]);
-      setMessages([]);
-      clearSeatSpeechBubbleTimers(seatSpeechBubbleTimersRef);
-      setSeatSpeechBubbles({});
-      setDefaultEntryName(getSavedKnightNameTrimmed() ?? '');
-      if (statusRef.current !== 'room_full') {
-        setStatus('disconnected');
-        setError('Lost connection to the server.');
-      }
-      setActivityNotice(null);
-      if (activityNoticeTimerRef.current) {
-        clearTimeout(activityNoticeTimerRef.current);
-        activityNoticeTimerRef.current = null;
-      }
+      if (status !== 'in_room') setStatus('disconnected');
     };
 
     const handleConnectError = () => {
       setSocketConnected(false);
-      setError('Could not connect to the server. Check that it is running (port 3000).');
-      pendingNameRef.current = null;
-      joinPendingRef.current = false;
-      setJoinPending(false);
-      setDefaultEntryName(getSavedKnightNameTrimmed() ?? '');
-
-      if (statusRef.current === 'restoring') {
-        return;
-      }
-
-      setJoinedSelf(null);
-      selfIdRef.current = null;
       setStatus('disconnected');
+      setError('Could not connect to the server.');
+      setJoinPending(false);
+      joinPendingRef.current = false;
     };
 
     const handleRoomFull = () => {
       setStatus('room_full');
-      setDefaultEntryName(getSavedKnightNameTrimmed() ?? '');
-      pendingNameRef.current = null;
-      joinPendingRef.current = false;
       setJoinPending(false);
+      joinPendingRef.current = false;
     };
 
-    const handleJoinSuccess = (payload: {
-      currentUser: User;
-      roomState: { users: User[]; messages: ChatMessage[] };
-    }) => {
-      clearSeatSpeechBubbleTimers(seatSpeechBubbleTimersRef);
-      setSeatSpeechBubbles({});
-      setSavedKnightName(payload.currentUser.knightName);
-      setSavedAvatarId(payload.currentUser.avatarId);
-      setDefaultEntryName(payload.currentUser.knightName);
-      selfIdRef.current = payload.currentUser.id;
+    const handleJoinSuccess = (payload: { currentUser: User; roomState: { users: User[]; messages: ChatMessage[] } }) => {
       setJoinedSelf(payload.currentUser);
+      selfIdRef.current = payload.currentUser.id;
       setUsers(payload.roomState.users);
-      setMessages(filterUserFeedMessages(payload.roomState.messages));
+      setMessages(payload.roomState.messages.filter((m) => m.type === 'user'));
       setStatus('in_room');
-      pendingNameRef.current = null;
-      joinPendingRef.current = false;
       setJoinPending(false);
+      joinPendingRef.current = false;
       setError(null);
     };
 
     const handleJoinError = (payload: { message: string }) => {
-      pendingNameRef.current = null;
-      joinPendingRef.current = false;
       setJoinPending(false);
-      setError(payload.message);
-      if (shouldClearSessionOnJoinError(payload.message)) {
-        clearSavedKnightName();
-        clearSavedAvatarId();
-        setDefaultEntryName('');
+      joinPendingRef.current = false;
+      if (payload.message === 'auth_required') {
+        // This shouldn't happen if useAuth is working, but handle gracefully
+        setStatus('connected');
+        setError('Session expired. Please log in again.');
       } else {
-        setDefaultEntryName(getSavedKnightNameTrimmed() ?? '');
-      }
-      if (statusRef.current !== 'in_room') {
+        setError(payload.message);
         setStatus('connected');
       }
     };
 
     const handleRoomState = (state: { users: User[]; messages: ChatMessage[] }) => {
-      if (statusRef.current !== 'in_room') {
-        return;
-      }
       setUsers(state.users);
-      setMessages(filterUserFeedMessages(state.messages));
-      const id = socket.id ?? selfIdRef.current;
-      if (!id) return;
-      const me = state.users.find((u) => u.id === id);
-      if (me) {
-        setJoinedSelf(me);
-      }
+      setMessages(state.messages.filter((m) => m.type === 'user'));
     };
 
     const handleUserJoined = (user: User) => {
-      setUsers((prev) => [...prev.filter((u) => u.id !== user.id), user]);
+      setUsers((prev) => (prev.some((u) => u.id === user.id) ? prev : [...prev, user]));
     };
 
     const handleUserLeft = (userId: string) => {
-      const existing = seatSpeechBubbleTimersRef.current.get(userId);
-      if (existing) {
-        clearTimeout(existing);
-      }
-      seatSpeechBubbleTimersRef.current.delete(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
       setSeatSpeechBubbles((prev) => {
-        if (!(userId in prev)) return prev;
         const next = { ...prev };
         delete next[userId];
         return next;
       });
-      const wasSelf = selfIdRef.current === userId;
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
-      if (wasSelf) {
-        selfIdRef.current = null;
-        setJoinedSelf(null);
-        setStatus('connected');
-        setMessages([]);
-        clearSeatSpeechBubbleTimers(seatSpeechBubbleTimersRef);
-        setSeatSpeechBubbles({});
-      }
     };
 
-    const handleChatMessage = (message: ChatMessage) => {
-      setMessages((prev) => appendMessageUnique(prev, message));
-
-      if (message.type !== 'user' || !message.userId) {
-        return;
-      }
-
-      const uid = message.userId;
-      const prevTimer = seatSpeechBubbleTimersRef.current.get(uid);
-      if (prevTimer) clearTimeout(prevTimer);
-
-      setSeatSpeechBubbles((prev) => ({
-        ...prev,
-        [uid]: {
-          text: message.text,
-          replyToKnightName: message.replyToKnightName,
-          sourceMessageId: message.id,
-        },
-      }));
-
-      const delayMs = 5200 + Math.floor(Math.random() * 2600);
-      seatSpeechBubbleTimersRef.current.set(
-        uid,
-        setTimeout(() => {
-          seatSpeechBubbleTimersRef.current.delete(uid);
-          setSeatSpeechBubbles((past) => {
-            if (!(uid in past)) return past;
-            const next = { ...past };
-            delete next[uid];
-            return next;
-          });
-        }, delayMs)
-      );
+    const handleChatMessage = (msg: ChatMessage) => {
+      setMessages((prev) => appendUnique(prev, msg));
+      pushSpeechBubble(msg);
     };
 
     const handleRoomNotice = (payload: RoomNoticePayload) => {
@@ -332,8 +187,8 @@ export function useRoom(): UseRoomReturn {
       );
     };
 
-    socket.on('connect', handleSocketConnect);
-    socket.on('disconnect', handleSocketDisconnect);
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleConnectError);
     socket.on('room_full', handleRoomFull);
     socket.on('join_success', handleJoinSuccess);
@@ -348,24 +203,9 @@ export function useRoom(): UseRoomReturn {
 
     setSocketConnected(socket.connected);
 
-    const bootstrapName = pendingNameRef.current?.trim();
-    if (bootstrapName && joinPendingRef.current) {
-      const preferredAvatarId = getSavedAvatarId();
-      const payload: JoinRoomPayload = { knightName: bootstrapName };
-      if (preferredAvatarId !== null) {
-        payload.preferredAvatarId = preferredAvatarId;
-      }
-
-      if (socket.connected) {
-        socket.emit('join_room', payload);
-      } else {
-        socket.connect();
-      }
-    }
-
     return () => {
-      socket.off('connect', handleSocketConnect);
-      socket.off('disconnect', handleSocketDisconnect);
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleConnectError);
       socket.off('room_full', handleRoomFull);
       socket.off('join_success', handleJoinSuccess);
@@ -377,35 +217,17 @@ export function useRoom(): UseRoomReturn {
       socket.off('room_notice', handleRoomNotice);
       socket.off('mic_status', handleMicStatus);
       socket.off('speaking_status', handleSpeakingStatus);
-      if (activityNoticeTimerRef.current) {
-        clearTimeout(activityNoticeTimerRef.current);
-      }
-      clearSeatSpeechBubbleTimers(seatSpeechBubbleTimersRef);
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
+      bubbleTimersRef.current.forEach((t) => clearTimeout(t));
     };
-  }, [pushActivityNotice]);
+  }, [pushActivityNotice, pushSpeechBubble]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const joinRoom = useCallback((knightName: string) => {
-    const trimmed = knightName.trim();
-    if (!trimmed) return;
-
+  const joinRoom = useCallback(() => {
     setError(null);
-    pendingNameRef.current = trimmed;
-    joinPendingRef.current = true;
     setJoinPending(true);
-
-    setStatus((prev) => {
-      if (prev === 'in_room') return prev;
-      return socket.connected ? 'connected' : 'connecting';
-    });
-
-    const preferredAvatarId = getSavedAvatarId();
-    const payload: JoinRoomPayload = { knightName: trimmed };
-    if (preferredAvatarId !== null) {
-      payload.preferredAvatarId = preferredAvatarId;
-    }
-
+    joinPendingRef.current = true;
     if (socket.connected) {
-      socket.emit('join_room', payload);
+      socket.emit('join_room');
     } else {
       socket.connect();
     }
@@ -414,11 +236,8 @@ export function useRoom(): UseRoomReturn {
   const sendMessage = useCallback((text: string, options?: SendChatOptions) => {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length > 500) return;
-    const replyToUserId = options?.replyToUserId?.trim();
-    const payload: ChatMessagePayload =
-      replyToUserId && replyToUserId.length > 0
-        ? { text: trimmed, replyToUserId }
-        : { text: trimmed };
+    const payload: ChatMessagePayload = { text: trimmed };
+    if (options?.replyToUserId) payload.replyToUserId = options.replyToUserId;
     socket.emit('chat_message', payload);
   }, []);
 
@@ -430,66 +249,26 @@ export function useRoom(): UseRoomReturn {
     socket.emit('speaking_status', { isSpeaking });
   }, []);
 
-  const cancelSessionRestore = useCallback(() => {
-    clearSavedKnightName();
-    pendingNameRef.current = null;
-    joinPendingRef.current = false;
-    setJoinPending(false);
-    setError(null);
-    setDefaultEntryName('');
-    setStatus(socket.connected ? 'connected' : 'connecting');
-  }, []);
-
-  const retryRestoreConnection = useCallback(() => {
-    setError(null);
-    const n = getSavedKnightNameTrimmed();
-    if (!n) {
-      cancelSessionRestore();
-      return;
-    }
-    pendingNameRef.current = n;
-    joinPendingRef.current = true;
-    setJoinPending(true);
-    setStatus('restoring');
-    setDefaultEntryName(n);
-    if (socket.connected) {
-      socket.emit('join_room', { knightName: n });
-    } else {
-      socket.connect();
-    }
-  }, [cancelSessionRestore]);
-
   const leaveTable = useCallback(() => {
-    clearSavedKnightName();
-    clearSavedAvatarId();
-    pendingNameRef.current = null;
-    joinPendingRef.current = false;
-    setJoinPending(false);
     setJoinedSelf(null);
     selfIdRef.current = null;
     setUsers([]);
     setMessages([]);
-    clearSeatSpeechBubbleTimers(seatSpeechBubbleTimersRef);
     setSeatSpeechBubbles({});
+    bubbleTimersRef.current.forEach((t) => clearTimeout(t));
+    bubbleTimersRef.current.clear();
     setError(null);
     setActivityNotice(null);
-    setDefaultEntryName('');
-    setStatus('connected');
+    setJoinPending(false);
+    joinPendingRef.current = false;
+    setStatus(socket.connected ? 'connected' : 'connecting');
     socket.emit('leave_room');
-    if (activityNoticeTimerRef.current) {
-      clearTimeout(activityNoticeTimerRef.current);
-      activityNoticeTimerRef.current = null;
-    }
   }, []);
 
   const retryAfterRoomFull = useCallback(() => {
     setError(null);
-    const n = getSavedKnightNameTrimmed();
-    if (n) {
-      joinRoom(n);
-    } else {
-      setStatus('connected');
-    }
+    setStatus(socket.connected ? 'connected' : 'connecting');
+    joinRoom();
   }, [joinRoom]);
 
   return {
@@ -501,13 +280,10 @@ export function useRoom(): UseRoomReturn {
     socketConnected,
     joinPending,
     activityNotice,
-    defaultEntryName,
     joinRoom,
     sendMessage,
     updateMicStatus,
     updateSpeakingStatus,
-    cancelSessionRestore,
-    retryRestoreConnection,
     leaveTable,
     retryAfterRoomFull,
     seatSpeechBubbles,

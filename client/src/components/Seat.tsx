@@ -41,7 +41,10 @@ export function Seat({
       .join(' ');
 
   const canPickReply =
-    Boolean(onReplySeatPick) && Boolean(user) && !isCurrentUser;
+    Boolean(onReplySeatPick) &&
+    Boolean(user) &&
+    !isCurrentUser &&
+    !user?.isTableFixture;
 
   const pickReplyTarget = (): void => {
     if (!onReplySeatPick || !user || isCurrentUser) return;
@@ -90,27 +93,38 @@ export function Seat({
           <MicOff className="seat-mic-indicator-icon" />
         )}
       </span>
+    </>
+  );
+
+  const caption = (
+    <div className="seat-marker-caption">
+      <span className="seat-name-label" title={user.knightName}>
+        {user.knightName}
+      </span>
       {isCurrentUser ? (
         <span className="seat-you-badge" aria-live="polite">
           You
         </span>
       ) : null}
-    </>
+    </div>
   );
 
   if (canPickReply) {
     return (
       <div className={markerShellClass} style={markerStyle}>
-        <button
-          type="button"
-          className="seat-marker seat-marker-filled seat-marker-interactive"
-          aria-label={`Reply to ${user.knightName}`}
-          title={user.knightName}
-          onClick={pickReplyTarget}
-          onKeyDown={handleKeyDown}
-        >
-          {markerInner}
-        </button>
+        <div className="seat-marker-cluster">
+          <button
+            type="button"
+            className="seat-marker seat-marker-filled seat-marker-interactive"
+            aria-label={`Reply to ${user.knightName}`}
+            title={user.knightName}
+            onClick={pickReplyTarget}
+            onKeyDown={handleKeyDown}
+          >
+            {markerInner}
+          </button>
+          {caption}
+        </div>
       </div>
     );
   }
@@ -125,8 +139,9 @@ export function Seat({
       aria-label={label}
       title={user.knightName}
     >
-      <div className="seat-marker seat-marker-filled seat-marker-self">
-        {markerInner}
+      <div className="seat-marker-cluster">
+        <div className="seat-marker seat-marker-filled seat-marker-self">{markerInner}</div>
+        {caption}
       </div>
     </div>
   );

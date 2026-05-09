@@ -1,0 +1,22 @@
+# Development image — source is bind-mounted from the host.
+# node_modules live in a named volume so native modules (better-sqlite3)
+# are compiled for Linux/Alpine and never pulled from the Windows host.
+FROM node:20-alpine
+
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+# Pre-install into the image layer so the volume-init stamp check
+# in the entrypoint can do a fast `npm rebuild` instead of full install
+# on subsequent starts.
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
+
+ENV NODE_ENV=development
+EXPOSE 3000 5173
+
+COPY docker-entrypoint.dev.sh /usr/local/bin/docker-entrypoint.dev.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.dev.sh
+
+ENTRYPOINT ["docker-entrypoint.dev.sh"]

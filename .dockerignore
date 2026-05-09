@@ -1,0 +1,50 @@
+# Dependencies — fresh install in image via npm ci
+node_modules
+**/node_modules
+
+# Built artifacts — produced in the builder stage (npm run build)
+dist
+**/dist
+
+# Git & CI (not needed inside the image)
+.git
+.gitattributes
+.github
+
+# Local env & secrets — pass via compose / runtime only
+.env
+.env.*
+!.env.example
+
+# Editors & OS junk
+.cursor
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs & debug
+*.log
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Caches
+.cache
+.eslintcache
+.turbo
+.parcel-cache
+
+# Tests & coverage (not used by Dockerfile build)
+coverage
+.nyc_output
+
+# Local Docker / orchestration not copied by Dockerfile (smaller context)
+docker-compose.yml
+docker-compose.*.yml
+Makefile
+
+# Docs (optional — remove this line if you COPY markdown into the image)
+*.md

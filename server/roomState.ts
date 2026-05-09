@@ -1,6 +1,6 @@
 import type { User, ChatMessage, RoomState } from './types.js';
 
-const MAX_SEATS = 13;
+const MAX_SEATS = 24;
 const MAX_MESSAGES = 100;
 
 class RoomStateManager {

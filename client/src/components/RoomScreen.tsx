@@ -7,6 +7,7 @@ import type {
   SendChatOptions,
   SeatSpeechBubbleState,
 } from '../types';
+import type { AuthUser } from '../lib/authSession';
 import { RoundTable } from './RoundTable';
 import { ChatPanel } from './ChatPanel';
 import { KnightRoster } from './KnightRoster';
@@ -20,9 +21,11 @@ interface RoomScreenProps {
   micError: string | null;
   activityNotice: string | null;
   seatSpeechBubbles: Record<string, SeatSpeechBubbleState>;
+  authUser: AuthUser | null;
+  error: string | null;
   sendMessage: (text: string, options?: SendChatOptions) => void;
   onToggleMic: () => void;
-  onLeaveTable: () => void;
+  onLogout: () => void;
 }
 
 export function RoomScreen({
@@ -34,9 +37,11 @@ export function RoomScreen({
   micError,
   activityNotice,
   seatSpeechBubbles,
+  authUser,
+  error,
   sendMessage,
   onToggleMic,
-  onLeaveTable,
+  onLogout,
 }: RoomScreenProps) {
   const [replyTarget, setReplyTarget] = useState<ChatReplyTarget | null>(null);
 
@@ -50,33 +55,45 @@ export function RoomScreen({
 
   return (
     <div className="room-screen">
+      <div className="table-section">
+        <RoundTable
+          users={users}
+          currentUserId={currentUser.id}
+          seatSpeechBubbles={seatSpeechBubbles}
+          onReplySeatPick={setReplyTarget}
+        />
+      </div>
       <header className="room-toolbar">
         <div className="room-toolbar-inner">
           <span className="room-toolbar-seat" aria-hidden>
-            Winchester chamber
+            Winchester round table
+            {authUser && (
+              <span style={{ opacity: 0.65, marginLeft: '0.5rem', fontSize: '0.85em' }}>
+                — {authUser.username}
+              </span>
+            )}
           </span>
-          <button
-            type="button"
-            className="leave-table-button"
-            onClick={onLeaveTable}
-            aria-label="Leave table and clear saved name"
-          >
-            <LogOut className="leave-table-icon" aria-hidden />
-            Leave table
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="leave-table-button logout-button"
+              onClick={onLogout}
+              title="Log out and clear session"
+            >
+              <LogOut className="leave-table-icon" aria-hidden />
+              Log out
+            </button>
+          </div>
         </div>
+        {error && (
+          <p style={{ color: 'var(--accent-red)', textAlign: 'center', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>
+            {error}
+          </p>
+        )}
       </header>
       <div className="room-main">
         <div className="sidebar sidebar-left">
           <KnightRoster users={users} currentUserId={currentUser.id} />
-        </div>
-        <div className="table-section">
-          <RoundTable
-            users={users}
-            currentUserId={currentUser.id}
-            seatSpeechBubbles={seatSpeechBubbles}
-            onReplySeatPick={setReplyTarget}
-          />
         </div>
         <div className="sidebar">
           <ChatPanel

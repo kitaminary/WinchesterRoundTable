@@ -1,0 +1,54 @@
+services:
+  winchester:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+      - "4040:4040"   # ngrok admin UI
+    environment:
+      PORT: 3000
+      CHAT_HISTORY_VERSION: ${CHAT_HISTORY_VERSION:-1}
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+      ENABLE_BORE: ${ENABLE_BORE:-1}
+      BORE_SERVER: ${BORE_SERVER:-bore.pub}
+      DATA_DIR: /app/data
+      NODE_ENV: production
+    volumes:
+      - winchester_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Hot reload: open http://localhost:${DEV_CLIENT_PORT:-5173} — stop the prod service if port 3000 is taken.
+  winchester-dev:
+    profiles: [dev]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "${DEV_CLIENT_PORT:-5173}:5173"
+      - "${DEV_SERVER_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      CHAT_HISTORY_VERSION: ${CHAT_HISTORY_VERSION:-1}
+      DATA_DIR: /app/data
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - .:/app
+      - winchester_dev_node_modules:/app/node_modules
+      - winchester_dev_data:/app/data
+    restart: "no"
+    stdin_open: true
+    tty: true
+
+volumes:
+  winchester_data:
+    driver: local
+  winchester_dev_node_modules:
+    driver: local
+  winchester_dev_data:
+    driver: local

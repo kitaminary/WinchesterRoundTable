@@ -1,9 +1,9 @@
 import { io, Socket } from 'socket.io-client';
+import { getStoredToken } from './lib/authSession';
 import type {
   User,
   RoomState,
   ChatMessage,
-  JoinRoomPayload,
   ChatMessagePayload,
   MicStatusPayload,
   SpeakingStatusPayload,
@@ -33,7 +33,7 @@ interface ServerToClientEvents {
 }
 
 interface ClientToServerEvents {
-  join_room: (payload: JoinRoomPayload) => void;
+  join_room: () => void;
   chat_message: (payload: ChatMessagePayload) => void;
   mic_status: (payload: MicStatusPayload) => void;
   speaking_status: (payload: SpeakingStatusPayload) => void;
@@ -45,19 +45,30 @@ interface ClientToServerEvents {
 }
 
 const SOCKET_URL =
-  typeof import.meta.env.VITE_SOCKET_URL === 'string' && import.meta.env.VITE_SOCKET_URL.trim() !== ''
+  typeof import.meta.env.VITE_SOCKET_URL === 'string' &&
+  import.meta.env.VITE_SOCKET_URL.trim() !== ''
     ? import.meta.env.VITE_SOCKET_URL.trim()
     : import.meta.env.DEV
       ? 'http://localhost:3000'
       : window.location.origin;
 
 export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOCKET_URL, {
-  autoConnect: true,
+  autoConnect: false, // we connect manually after auth
   reconnection: true,
   reconnectionAttempts: 10,
   reconnectionDelay: 1000,
   timeout: 10000,
+  auth: (cb: (data: Record<string, unknown>) => void) => {
+    cb({ token: getStoredToken() ?? '' });
+  },
 });
+
+export function reconnectSocket(): void {
+  if (socket.connected) {
+    socket.disconnect();
+  }
+  socket.connect();
+}
 
 export function getSocketId(): string | undefined {
   return socket.id;

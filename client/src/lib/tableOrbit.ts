@@ -1,4 +1,4 @@
-export const ROUND_TABLE_SEAT_COUNT = 13;
+export const ROUND_TABLE_SEAT_COUNT = 24;
 
 const RAD = Math.PI / 180;
 
@@ -41,14 +41,21 @@ export function seatPerspectivePosition(
   seatIndex: number,
   totalSeats: number
 ): SeatPerspectivePosition {
-  const angle = -Math.PI / 2 + (seatIndex / totalSeats) * Math.PI * 2;
+  const angle = -Math.PI / 0.981 + (seatIndex / totalSeats) * Math.PI * 2;
 
-  const orbitRadiusX = 40;
-  const orbitRadiusY = 34;
+  // Derived from the perspective projection of the rotateX(54°) table disc.
+  // The table art is tilted 54° on X with transform-origin at 50%/58%.
+  // After perspective projection (1500px), the disc rim maps to an ellipse
+  // centred at ~(40%, 59%) with semi-axes ~(33%, 22%) in round-table space (x −10pp vs disc).
+  // Using slightly smaller radii (33/22 vs rim 35/24) so avatar centres sit
+  // at the rim rather than straddling it from outside.
+  const orbitRadiusX = 37;
+  const orbitRadiusY = 22;
 
-  const centerX = 46;
-  /** Сдвиг вниз относительно визуального центра наклонённой столешницы */
-  const centerY = 54;
+  const centerX = 48;
+  // 59% — perspective projection of the tilted disc shifts the visual
+  // orbit centre below the geometric centre of the round-table div.
+  const centerY = 53;
 
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -58,11 +65,14 @@ export function seatPerspectivePosition(
 
   const depth = (sin + 1) / 2;
 
-  const scale = 0.74 + depth * 0.34;
+  // Subtle depth cue: back (top) seats 0.82 scale, front (bottom) 0.94.
+  // All seats are in the same flat CSS plane (no real 3D scaling), so this
+  // is purely an artistic perspective hint.
+  const scale = 0.62 + depth * 0.2;
 
-  const zIndex = 0 + Math.round(depth * 60);
+  const zIndex = 10 + Math.round(depth * 50);
 
-  const bubbleYOffset = 82 + depth * 18;
+  const bubbleYOffset = 10 + depth * 14;
 
   return { xPercent, yPercent, scale, depth, zIndex, bubbleYOffset };
 }

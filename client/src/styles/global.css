@@ -369,10 +369,10 @@ body {
 }
 
 .table-section {
-  position: fixed;
+  position: absolute;
   display: flex;
   flex-direction: column;
-  align-items: center;
+
   justify-content: center;
   gap: 1rem;
   width: 100%;
@@ -383,6 +383,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  width: 400px;
+}
+
+.sidebar-left {
+  max-width: 300px;
 }
 
 @media (max-width: 992px) {
@@ -464,7 +469,7 @@ body {
     min-height: 0;
     max-height: none;
     flex: 1 1 100%;
-    max-height: none;
+    max-height: 100% !important;
   }
 
   .chat-messages {
@@ -497,15 +502,20 @@ body {
   perspective: 1500px;
   perspective-origin: 50% 38%;
   overflow: visible;
+  transform: scale(1.58);
 }
 
 .round-table.table-scene-board {
   user-select: none;
   position: relative;
+  top: -60px;
+  left: -50px;
   width: clamp(620px, 64vw, 940px);
   aspect-ratio: 1;
   margin: 0 auto;
-  transform-style: preserve-3d;
+  /* No preserve-3d here — that caused 3D depth-sort to override z-index,
+     pushing the bottom table rim in front of the seat overlay.
+     The table art layer has its own preserve-3d for the edge/surface depth. */
   overflow: visible;
 }
 
@@ -564,7 +574,9 @@ body {
   position: absolute;
   inset: 8%;
   border-radius: 50%;
-  overflow: hidden;
+  /* Rim labels use tall blackletter glyphs + curved textPath; hidden overflow
+     clipped ascenders/descenders against the circular panel edge. */
+  overflow: visible;
   transform: translateZ(18px);
   background: radial-gradient(circle at 50% 42%, #283528 0%, #10140e 100%);
   border: 8px solid #b88b32;
@@ -590,6 +602,7 @@ body {
   height: 97%;
   display: block;
   border-radius: 50%;
+  overflow: visible;
 }
 
 .table-inner {
@@ -616,12 +629,11 @@ body {
   z-index: 6;
 }
 
-/* Выше геометрии стола в 3D-сцене: иначе нижние медальоны «уходят» под боковину */
+/* Seat overlay is a flat 2D layer above the table art (z-index 5).
+   No translateZ needed — z-index 50 on the parent .seats-ring handles
+   stacking now that the scene root no longer uses preserve-3d. */
 .seats-orbit-flat {
   z-index: 20;
-  transform: translateZ(180px);
-  transform-style: flat;
-  backface-visibility: hidden;
 }
 
 /* --- Seat markers (compact knights around table) + speech bubbles --- */
@@ -643,6 +655,39 @@ body {
   opacity: 0.92;
 }
 
+.seat-marker-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.seat-marker-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  max-width: clamp(88px, 12vw, 140px);
+  text-align: center;
+  pointer-events: none;
+}
+
+.seat-name-label {
+  font-family: var(--font-display, Cinzel), Georgia, 'Times New Roman', serif;
+  font-size: clamp(0.55rem, 1.05vw, 0.72rem);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  color: rgba(246, 234, 200, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 10px rgba(18, 10, 6, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .seat-marker-shell .seat-marker {
   appearance: none;
   border: none;
@@ -654,8 +699,8 @@ body {
 
 .seat-marker {
   position: relative;
-  width: clamp(58px, 6.5vw, 82px);
-  height: clamp(58px, 6.5vw, 82px);
+  width: clamp(50px, 5.5vw, 70px);
+  height: clamp(50px, 5.5vw, 70px);
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -665,7 +710,7 @@ body {
     radial-gradient(circle at 38% 24%, rgba(85, 70, 48, 0.95), rgba(18, 14, 10, 0.98) 68%),
     linear-gradient(145deg, #332416, #0e0906);
   box-shadow:
-    inset 0 2px 8px rgba(255, 255, 255, 0.08),
+    inset 0 2px 8px rgba(255, 255, 255, 0.18),
     inset 0 -8px 18px rgba(0, 0, 0, 0.55),
     0 10px 18px rgba(0, 0, 0, 0.48),
     0 0 0 1px rgba(25, 13, 6, 0.9);
@@ -808,16 +853,13 @@ body {
 }
 
 .seat-you-badge {
-  position: absolute;
-  left: 50%;
-  bottom: -27px;
-  transform: translateX(-50%);
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 999px;
   font-family: var(--font-display);
-  font-size: 0.58rem;
+  font-size: 0.5rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: #f3d98b;
   background: rgba(18, 12, 8, 0.92);
   border: 1px solid rgba(218, 174, 75, 0.68);
@@ -848,8 +890,8 @@ body {
 .seat-message-bubble {
   position: absolute;
   left: 50%;
-  bottom: var(--bubble-y-offset, 96px);
-  transform: translateX(-50%);
+  bottom: var(--bubble-y-offset);
+  transform: translateX(-30%);
   min-width: 120px;
   max-width: 220px;
   padding: 0.45rem 0.65rem 0.55rem;
@@ -1026,7 +1068,8 @@ body {
 }
 
 .voice-button {
-  position: relative;
+  position: absolute;
+  right: 0;
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -1130,7 +1173,6 @@ body {
 /* --- Knight roster --- */
 .knight-roster {
   width: 100%;
-  background: linear-gradient(168deg, rgba(240, 228, 192, 0.08) 0%, rgba(22, 18, 12, 0.92) 100%);
   border: 1px solid rgba(212, 175, 55, 0.38);
   border-radius: 10px;
   padding: 0.75rem 0.88rem;
@@ -1138,6 +1180,12 @@ body {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+@media (max-width: 992px) {
+  .knight-roster {
+    backdrop-filter: blur(8px);
+  }
 }
 
 .roster-header {
@@ -1159,10 +1207,82 @@ body {
   height: 18px;
 }
 
-.roster-count {
+.roster-header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.roster-count {
   opacity: 0.85;
   font-weight: 600;
+  text-align: right;
+  max-width: 11rem;
+  line-height: 1.2;
+}
+
+.roster-test-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--gold-bright);
+  font-family: var(--font-body, inherit);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.roster-test-toggle:hover {
+  background: rgba(201, 162, 39, 0.12);
+  border-color: rgba(212, 175, 55, 0.55);
+}
+
+.roster-test-toggle.active {
+  background: rgba(201, 162, 39, 0.22);
+  border-color: rgba(212, 175, 55, 0.65);
+}
+
+.roster-test-toggle-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.roster-test-toggle-label {
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .roster-test-toggle-label {
+    display: none;
+  }
+
+  .roster-test-toggle {
+    padding: 0.25rem;
+  }
+}
+
+.roster-item.test-knight {
+  opacity: 0.78;
+  border: 1px dashed rgba(201, 162, 39, 0.28);
+}
+
+.roster-demo-tag {
+  opacity: 0.55;
+  font-weight: 500;
+  font-size: 0.72rem;
 }
 
 .roster-list {
@@ -1171,13 +1291,14 @@ body {
   gap: 0.45rem;
   max-height: 200px;
   overflow-y: auto;
+  padding-right: 0.40rem;
 }
 
 .roster-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.38rem 0.48rem;
+  padding: 0.38rem 0.38rem;
   border-radius: 6px;
   transition: background var(--transition-fast);
   cursor: default;
@@ -1231,6 +1352,10 @@ body {
   font-family: var(--font-display);
   font-size: 0.8rem;
   font-weight: 600;
+  overflow: hidden;
+  line-clamp: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roster-you {
@@ -1287,9 +1412,14 @@ body {
   color: var(--gold-bright);
 }
 
+@media (max-width: 992px) {
+  .chat-panel {
+    backdrop-filter: blur(8px);
+  }
+}
+
 .chat-header-titles-left {
   display: flex;
-  justify-content: space-between;
   gap: 0.55rem;
 }
 
@@ -1387,6 +1517,10 @@ body {
   font-family: var(--font-display);
   font-size: 0.78rem;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100px;
 }
 
 .message-time {
@@ -1514,7 +1648,7 @@ body {
   width: 100%;
   padding: 0.72rem 0.9rem;
   font-family: var(--font-body);
-  font-size: 1.05rem;
+  font-size: 0.8rem;
   border: 2px solid rgba(201, 162, 39, 0.5);
   border-radius: 5px;
   background-color: #141210;
@@ -1577,4 +1711,226 @@ body {
 .send-icon {
   width: 20px;
   height: 20px;
+}
+/* ─── Login / Auth Styles ─────────────────────────────────────────────────── */
+
+.login-card {
+  max-width: 480px;
+}
+
+.login-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.5rem;
+  border: 2px solid var(--stone-edge);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.login-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: none;
+  background: rgba(26, 22, 18, 0.06);
+  color: var(--ink-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.login-tab.active {
+  background: var(--forest-deep);
+  color: var(--gold-bright);
+}
+
+.login-tab:not(.active):hover {
+  background: rgba(45, 90, 61, 0.12);
+  color: var(--ink);
+}
+
+.login-tab-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Avatar picker grid */
+.avatar-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.avatar-picker-item {
+  aspect-ratio: 1;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.avatar-picker-item:hover {
+  border-color: var(--gold);
+  transform: scale(1.06);
+}
+
+.avatar-picker-item.selected {
+  border-color: var(--gold-bright);
+  box-shadow: 0 0 0 2px var(--gold-shadow), 0 0 12px var(--gold-shadow);
+}
+
+.avatar-picker-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.avatar-picker-label {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  text-align: center;
+  font-family: var(--font-display);
+  letter-spacing: 0.05em;
+}
+
+/* ─── Logout button variant ───────────────────────────────────────────────── */
+.logout-button {
+  background: rgba(139, 41, 66, 0.18) !important;
+  border-color: rgba(139, 41, 66, 0.55) !important;
+  color: #d97a99 !important;
+}
+.logout-button:hover {
+  background: rgba(139, 41, 66, 0.3) !important;
+}
+
+/* ─── Emoji picker ────────────────────────────────────────────────────────── */
+.emoji-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  max-height: 200px;
+  overflow-y: auto;
+  max-width: 230px;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: linear-gradient(145deg, var(--parchment-deep), #c5b99a);
+  border: 2px solid var(--gold);
+  border-radius: 8px;
+  padding: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.emoji-btn {
+  font-size: 1.35rem;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0.2rem;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emoji-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  transform: scale(1.2);
+}
+
+.emoji-toggle-btn {
+  flex-shrink: 0;
+  width: 38px;
+  min-height: 2.85rem;
+  border: none;
+  border-radius: 6px;
+  background: rgba(201, 162, 39, 0.14);
+  color: var(--gold);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.emoji-toggle-btn:hover,
+.emoji-toggle-btn.active {
+  background: rgba(201, 162, 39, 0.28);
+  color: var(--gold-bright);
+}
+
+.emoji-toggle-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Make chat-input-section position relative for emoji panel */
+.chat-input-section {
+  position: relative;
+}
+
+/* ─── Current user seat highlight (gold ring + glow) ─────────────────────── */
+.seat-marker-shell-current .seat-marker {
+  box-shadow:
+    0 0 0 3px var(--gold-bright),
+    0 0 18px 4px var(--gold-shadow),
+    0 0 36px 8px rgba(201, 162, 39, 0.2) !important;
+}
+
+@keyframes currentSeatPulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--gold-bright), 0 0 18px 4px var(--gold-shadow); }
+  50%       { box-shadow: 0 0 0 4px var(--gold-bright), 0 0 28px 8px rgba(201, 162, 39, 0.45); }
+}
+
+.seat-marker-shell-current .seat-marker {
+  animation: currentSeatPulse 2.5s ease-in-out infinite;
+}
+
+/* ─── Roster speaking highlight ──────────────────────────────────────────── */
+.roster-item.speaking {
+  background: rgba(232, 204, 92, 0.12) !important;
+  border-left: 3px solid var(--gold-bright);
+}
+
+/* ─── Spin keyframe (used in loading screens) ────────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── Wake lock hint ─────────────────────────────────────────────────────── */
+.wake-lock-hint {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+}
+
+/* ─── Password match error hint ──────────────────────────────────────────── */
+.input-field-error {
+  border-color: var(--accent-red) !important;
+  box-shadow: 0 0 0 3px rgba(139, 41, 66, 0.22) !important;
+}
+
+.input-hint-error {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--accent-red);
 }

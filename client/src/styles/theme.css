@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Cloister Black';
+  src: url('/fonts/CloisterBlack.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --stone-dark: #1a1714;
   --stone-mid: #2d2925;
@@ -24,6 +32,7 @@
   --speaking-ring: rgba(232, 204, 92, 0.85);
   --shadow-deep: rgba(0, 0, 0, 0.55);
   --font-display: 'Cinzel', 'Times New Roman', serif;
+  --font-cloister-black: 'Cloister Black', 'UnifrakturMaguntia', Georgia, serif;
   --font-body: 'Crimson Text', Georgia, serif;
   --radius-shield: 12px;
   --transition-fast: 0.18s ease;

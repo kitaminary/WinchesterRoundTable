@@ -1,11 +1,14 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { socket, getSocketId } from '../socket';
 import type { User } from '../types';
+import { useWakeLock } from './useWakeLock';
 
 interface UseVoiceChatReturn {
   micEnabled: boolean;
   isSpeaking: boolean;
   micError: string | null;
+  wakeLockActive: boolean;
+  wakeLockUnsupported: boolean;
   toggleMic: () => Promise<void>;
   enableMic: () => Promise<void>;
   disableMic: () => void;
@@ -29,6 +32,7 @@ export function useVoiceChat(
   const [micEnabled, setMicEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  const { wakeLockActive, wakeLockUnsupported, requestWakeLock, releaseWakeLock } = useWakeLock();
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -49,7 +53,6 @@ export function useVoiceChat(
       pc.close();
       peerConnectionsRef.current.delete(userId);
     }
-
     const audio = remoteAudioRef.current.get(userId);
     if (audio) {
       audio.srcObject = null;
@@ -57,51 +60,52 @@ export function useVoiceChat(
     }
   }, []);
 
-  const createPeerConnection = useCallback((targetUserId: string): RTCPeerConnection => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+  const createPeerConnection = useCallback(
+    (targetUserId: string): RTCPeerConnection => {
+      const pc = new RTCPeerConnection(ICE_SERVERS);
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('voice_ice_candidate', {
-          targetUserId,
-          candidate: event.candidate.toJSON(),
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('voice_ice_candidate', {
+            targetUserId,
+            candidate: event.candidate.toJSON(),
+          });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        let audio = remoteAudioRef.current.get(targetUserId);
+        if (!audio) {
+          audio = new Audio();
+          audio.autoplay = true;
+          remoteAudioRef.current.set(targetUserId, audio);
+        }
+        audio.srcObject = event.streams[0];
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed') {
+          closePeerConnection(targetUserId);
+        }
+      };
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current!);
         });
       }
-    };
 
-    pc.ontrack = (event) => {
-      let audio = remoteAudioRef.current.get(targetUserId);
-      if (!audio) {
-        audio = new Audio();
-        audio.autoplay = true;
-        remoteAudioRef.current.set(targetUserId, audio);
-      }
-      audio.srcObject = event.streams[0];
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') {
-        closePeerConnection(targetUserId);
-      }
-    };
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current!);
-      });
-    }
-
-    peerConnectionsRef.current.set(targetUserId, pc);
-    return pc;
-  }, [closePeerConnection]);
+      peerConnectionsRef.current.set(targetUserId, pc);
+      return pc;
+    },
+    [closePeerConnection]
+  );
 
   const closeAllConnections = useCallback(() => {
     peerConnectionsRef.current.forEach((pc, id) => {
       pc.close();
       const audio = remoteAudioRef.current.get(id);
-      if (audio) {
-        audio.srcObject = null;
-      }
+      if (audio) audio.srcObject = null;
     });
     peerConnectionsRef.current.clear();
     remoteAudioRef.current.clear();
@@ -109,7 +113,6 @@ export function useVoiceChat(
 
   const startSpeakingDetection = useCallback(() => {
     if (!localStreamRef.current) return;
-
     try {
       audioContextRef.current = new AudioContext();
       const source = audioContextRef.current.createMediaStreamSource(localStreamRef.current);
@@ -118,14 +121,11 @@ export function useVoiceChat(
       source.connect(analyserRef.current);
 
       const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-
       speakingIntervalRef.current = window.setInterval(() => {
         if (!analyserRef.current) return;
-
         analyserRef.current.getByteFrequencyData(dataArray);
         const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
         const speaking = average > SPEAKING_THRESHOLD;
-
         if (speaking !== lastSpeakingRef.current) {
           lastSpeakingRef.current = speaking;
           setIsSpeaking(speaking);
@@ -154,11 +154,9 @@ export function useVoiceChat(
 
   const enableMic = useCallback(async () => {
     setMicError(null);
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
-
       startSpeakingDetection();
 
       const otherUsers = getOtherUsers();
@@ -171,37 +169,35 @@ export function useVoiceChat(
 
       setMicEnabled(true);
       onMicStatusChange(true);
+      void requestWakeLock();
     } catch (err) {
       let errorMessage =
         err instanceof Error ? err.message : 'Could not access the microphone.';
       const name =
         err instanceof DOMException ? err.name : err instanceof Error ? err.name : '';
       if (name === 'NotAllowedError') {
-        errorMessage =
-          'Microphone permission was denied';
+        errorMessage = 'Microphone permission was denied.';
       } else if (name === 'NotFoundError') {
         errorMessage = 'No microphone was found on this device.';
       }
       setMicError(errorMessage);
       console.error('Failed to enable microphone:', err);
     }
-  }, [getOtherUsers, createPeerConnection, startSpeakingDetection, onMicStatusChange]);
+  }, [getOtherUsers, createPeerConnection, startSpeakingDetection, onMicStatusChange, requestWakeLock]);
 
   const disableMic = useCallback(() => {
     stopSpeakingDetection();
-
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
-
     closeAllConnections();
     socket.emit('voice_leave');
-
     setMicEnabled(false);
     setMicError(null);
     onMicStatusChange(false);
-  }, [closeAllConnections, stopSpeakingDetection, onMicStatusChange]);
+    void releaseWakeLock();
+  }, [closeAllConnections, stopSpeakingDetection, onMicStatusChange, releaseWakeLock]);
 
   const toggleMic = useCallback(async () => {
     if (micEnabled) {
@@ -211,29 +207,33 @@ export function useVoiceChat(
     }
   }, [micEnabled, enableMic, disableMic]);
 
+  // WebRTC signalling handlers
   useEffect(() => {
-    const handleVoiceOffer = async (data: { fromUserId: string; offer: RTCSessionDescriptionInit }) => {
+    const handleVoiceOffer = async (data: {
+      fromUserId: string;
+      offer: RTCSessionDescriptionInit;
+    }) => {
       if (!micEnabled) return;
-
       let pc = peerConnectionsRef.current.get(data.fromUserId);
-      if (!pc) {
-        pc = createPeerConnection(data.fromUserId);
-      }
-
+      if (!pc) pc = createPeerConnection(data.fromUserId);
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('voice_answer', { targetUserId: data.fromUserId, answer });
     };
 
-    const handleVoiceAnswer = async (data: { fromUserId: string; answer: RTCSessionDescriptionInit }) => {
+    const handleVoiceAnswer = async (data: {
+      fromUserId: string;
+      answer: RTCSessionDescriptionInit;
+    }) => {
       const pc = peerConnectionsRef.current.get(data.fromUserId);
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      }
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
     };
 
-    const handleVoiceIceCandidate = async (data: { fromUserId: string; candidate: RTCIceCandidateInit }) => {
+    const handleVoiceIceCandidate = async (data: {
+      fromUserId: string;
+      candidate: RTCIceCandidateInit;
+    }) => {
       const pc = peerConnectionsRef.current.get(data.fromUserId);
       if (pc) {
         try {
@@ -267,11 +267,10 @@ export function useVoiceChat(
     };
   }, [micEnabled, createPeerConnection, closePeerConnection]);
 
+  // Auto-connect to new users with mic enabled
   useEffect(() => {
     if (!micEnabled) return;
-
     const otherUsers = getOtherUsers();
-    
     for (const user of otherUsers) {
       if (!peerConnectionsRef.current.has(user.id)) {
         const pc = createPeerConnection(user.id);
@@ -283,6 +282,7 @@ export function useVoiceChat(
     }
   }, [users, micEnabled, getOtherUsers, createPeerConnection]);
 
+  // Cleanup on unmount
   const cleanupRef = useRef<(() => void) | null>(null);
   cleanupRef.current = () => {
     if (speakingIntervalRef.current) {
@@ -300,30 +300,19 @@ export function useVoiceChat(
     }
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
-    remoteAudioRef.current.forEach((audio) => {
-      audio.srcObject = null;
-    });
+    remoteAudioRef.current.forEach((audio) => { audio.srcObject = null; });
     remoteAudioRef.current.clear();
-    try {
-      socket.emit('voice_leave');
-    } catch {
-      /* tab closing */
-    }
+    try { socket.emit('voice_leave'); } catch { /* tab closing */ }
   };
 
   useEffect(() => {
-    return () => {
-      cleanupRef.current?.();
-    };
+    return () => { cleanupRef.current?.(); };
   }, []);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (micEnabled) {
-        disableMic();
-      }
+      if (micEnabled) disableMic();
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [micEnabled, disableMic]);
@@ -332,6 +321,8 @@ export function useVoiceChat(
     micEnabled,
     isSpeaking,
     micError,
+    wakeLockActive,
+    wakeLockUnsupported,
     toggleMic,
     enableMic,
     disableMic,
