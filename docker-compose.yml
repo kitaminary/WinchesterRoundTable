@@ -32,6 +32,7 @@ services:
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
       ENABLE_BORE: ${ENABLE_BORE:-0}
       BORE_SERVER: ${BORE_SERVER:-bore.pub}
+      INVITE_CODE: ${INVITE_CODE:-}
       NODE_ENV: production
     restart: unless-stopped
     healthcheck:

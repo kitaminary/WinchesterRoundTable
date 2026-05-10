@@ -22,6 +22,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,6 +32,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     setError(null);
     setPassword('');
     setConfirmPassword('');
+    setInviteCode('');
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -58,7 +60,12 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
       const endpoint = tab === 'login' ? '/api/auth/login' : '/api/auth/register';
       const body: Record<string, unknown> =
         tab === 'register'
-          ? { username: u, password, avatarId: selectedAvatar }
+          ? {
+              username: u,
+              password,
+              avatarId: selectedAvatar,
+              ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}),
+            }
           : { username: u, password };
 
       const res = await fetch(endpoint, {
@@ -163,6 +170,25 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
               {confirmPassword && confirmPassword !== password && (
                 <p className="input-hint-error">Passwords do not match</p>
               )}
+            </div>
+          )}
+
+          {/* Invite code — register only, optional client-side; server enforces if INVITE_CODE is set */}
+          {tab === 'register' && (
+            <div className="input-group">
+              <label htmlFor="auth-invite-code" className="input-label">
+                Invite Code <span style={{ opacity: 0.6 }}>(if required)</span>
+              </label>
+              <input
+                id="auth-invite-code"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => { setInviteCode(e.target.value); setError(null); }}
+                placeholder="Leave empty if not required"
+                className="input-field"
+                autoComplete="off"
+                disabled={loading}
+              />
             </div>
           )}
 

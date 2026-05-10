@@ -37,6 +37,15 @@ function extractBearerToken(req: import('express').Request): string | null {
 
 // POST /api/auth/register
 authRouter.post('/register', async (req, res) => {
+  const requiredInvite = process.env.INVITE_CODE?.trim() ?? '';
+  if (requiredInvite) {
+    const provided = typeof req.body?.inviteCode === 'string' ? req.body.inviteCode.trim() : '';
+    if (provided !== requiredInvite) {
+      res.status(403).json({ error: 'Invalid invite code.' });
+      return;
+    }
+  }
+
   const username = validateUsername(req.body?.username);
   const password = validatePassword(req.body?.password);
   const avatarId = validateAvatarId(req.body?.avatarId);
