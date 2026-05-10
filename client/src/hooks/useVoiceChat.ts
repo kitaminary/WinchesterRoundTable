@@ -54,6 +54,8 @@ export function useVoiceChat(
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteAudioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  // Buffer ICE candidates that arrive before remoteDescription is set.
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const speakingIntervalRef = useRef<number | null>(null);
@@ -64,6 +66,9 @@ export function useVoiceChat(
   const closePeerConnectionRef = useRef<(userId: string) => void>(() => {});
   const createPeerConnectionRef = useRef<(targetUserId: string) => RTCPeerConnection>(
     null as unknown as (targetUserId: string) => RTCPeerConnection
+  );
+  const flushPendingCandidatesRef = useRef<(userId: string, pc: RTCPeerConnection) => Promise<void>>(
+    async () => {}
   );
 
   const getOtherUsers = useCallback(() => {
@@ -81,6 +86,20 @@ export function useVoiceChat(
     if (audio) {
       audio.srcObject = null;
       remoteAudioRef.current.delete(userId);
+    }
+    pendingCandidatesRef.current.delete(userId);
+  }, []);
+
+  const flushPendingCandidates = useCallback(async (userId: string, pc: RTCPeerConnection) => {
+    const queued = pendingCandidatesRef.current.get(userId);
+    if (!queued || queued.length === 0) return;
+    pendingCandidatesRef.current.delete(userId);
+    for (const c of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch {
+        // candidate may be stale after rollback — ignore silently
+      }
     }
   }, []);
 
@@ -138,6 +157,7 @@ export function useVoiceChat(
   // Keep refs in sync so socket handlers (registered once) use latest functions
   closePeerConnectionRef.current = closePeerConnection;
   createPeerConnectionRef.current = createPeerConnection;
+  flushPendingCandidatesRef.current = flushPendingCandidates;
 
   const closeAllConnections = useCallback(() => {
     peerConnectionsRef.current.forEach((pc, id) => {
@@ -300,6 +320,7 @@ export function useVoiceChat(
 
       if (!pc) pc = createPeerConnectionRef.current(data.fromUserId);
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      await flushPendingCandidatesRef.current(data.fromUserId, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('voice_answer', { targetUserId: data.fromUserId, answer });
@@ -310,7 +331,10 @@ export function useVoiceChat(
       answer: RTCSessionDescriptionInit;
     }) => {
       const pc = peerConnectionsRef.current.get(data.fromUserId);
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        await flushPendingCandidatesRef.current(data.fromUserId, pc);
+      }
     };
 
     const handleVoiceIceCandidate = async (data: {
@@ -318,12 +342,17 @@ export function useVoiceChat(
       candidate: RTCIceCandidateInit;
     }) => {
       const pc = peerConnectionsRef.current.get(data.fromUserId);
-      if (pc) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch {
-          console.warn('Failed to add ICE candidate');
-        }
+      // Queue candidates that arrive before remoteDescription is set.
+      if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
+        const queue = pendingCandidatesRef.current.get(data.fromUserId) ?? [];
+        queue.push(data.candidate);
+        pendingCandidatesRef.current.set(data.fromUserId, queue);
+        return;
+      }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch {
+        // candidate may have become stale (e.g. after rollback) — ignore
       }
     };
 
