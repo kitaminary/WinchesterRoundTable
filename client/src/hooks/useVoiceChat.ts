@@ -85,6 +85,7 @@ export function useVoiceChat(
     const audio = remoteAudioRef.current.get(userId);
     if (audio) {
       audio.srcObject = null;
+      audio.remove();
       remoteAudioRef.current.delete(userId);
     }
     pendingCandidatesRef.current.delete(userId);
@@ -120,8 +121,12 @@ export function useVoiceChat(
         console.log('[voice] ontrack from', targetUserId, 'streams:', event.streams.length);
         let audio = remoteAudioRef.current.get(targetUserId);
         if (!audio) {
-          audio = new Audio();
+          audio = document.createElement('audio');
           audio.autoplay = true;
+          audio.setAttribute('playsinline', 'true');
+          // Attach to DOM — some browsers won't play MediaStream from detached elements.
+          audio.style.display = 'none';
+          document.body.appendChild(audio);
           remoteAudioRef.current.set(targetUserId, audio);
         }
         audio.srcObject = event.streams[0];
@@ -167,7 +172,10 @@ export function useVoiceChat(
     peerConnectionsRef.current.forEach((pc, id) => {
       pc.close();
       const audio = remoteAudioRef.current.get(id);
-      if (audio) audio.srcObject = null;
+      if (audio) {
+        audio.srcObject = null;
+        audio.remove();
+      }
     });
     peerConnectionsRef.current.clear();
     remoteAudioRef.current.clear();
@@ -425,7 +433,10 @@ export function useVoiceChat(
     }
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
-    remoteAudioRef.current.forEach((audio) => { audio.srcObject = null; });
+    remoteAudioRef.current.forEach((audio) => {
+      audio.srcObject = null;
+      audio.remove();
+    });
     remoteAudioRef.current.clear();
     try { socket.emit('voice_leave'); } catch { /* tab closing */ }
   };
