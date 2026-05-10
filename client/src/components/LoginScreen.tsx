@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Shield, LogIn, UserPlus, Loader2 } from 'lucide-react';
 import type { AuthUser } from '../lib/authSession';
+import { unlockAudio } from '../lib/audioUnlock';
 
 const AVATAR_COUNT = 24;
 const AVATAR_LABELS = [
@@ -34,6 +35,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    unlockAudio();
     setError(null);
 
     const u = username.trim();

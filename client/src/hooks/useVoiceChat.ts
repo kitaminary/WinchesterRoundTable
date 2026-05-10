@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { socket, getSocketId } from '../socket';
+import { playOrQueue } from '../lib/audioUnlock';
 import type { User } from '../types';
 import { useWakeLock } from './useWakeLock';
 
@@ -51,26 +52,6 @@ const SPEAKING_THRESHOLD = 15;
 const SPEAKING_CHECK_INTERVAL = 100;
 const RECONNECT_DELAY = 3000;
 
-// Autoplay-blocked audio elements waiting for a user gesture to play.
-const blockedAudioElements: Set<HTMLAudioElement> = new Set();
-let gestureListenerInstalled = false;
-
-function installGestureListener() {
-  if (gestureListenerInstalled) return;
-  gestureListenerInstalled = true;
-  const resumeAll = () => {
-    blockedAudioElements.forEach((audio) => {
-      void audio.play().catch(() => {});
-    });
-    blockedAudioElements.clear();
-    window.removeEventListener('click', resumeAll);
-    window.removeEventListener('keydown', resumeAll);
-    gestureListenerInstalled = false;
-  };
-  window.addEventListener('click', resumeAll, { once: false });
-  window.addEventListener('keydown', resumeAll, { once: false });
-}
-
 export function useVoiceChat(
   users: User[],
   onMicStatusChange: (enabled: boolean) => void,
@@ -90,6 +71,12 @@ export function useVoiceChat(
   const lastSpeakingRef = useRef(false);
   const micEnabledRef = useRef(false);
 
+  // Stable refs for values used inside socket handlers (registered once)
+  const closePeerConnectionRef = useRef<(userId: string) => void>(() => {});
+  const createPeerConnectionRef = useRef<(targetUserId: string) => RTCPeerConnection>(
+    null as unknown as (targetUserId: string) => RTCPeerConnection
+  );
+
   const getOtherUsers = useCallback(() => {
     const myId = getSocketId();
     return users.filter((u) => u.id !== myId && u.micEnabled);
@@ -103,7 +90,6 @@ export function useVoiceChat(
     }
     const audio = remoteAudioRef.current.get(userId);
     if (audio) {
-      blockedAudioElements.delete(audio);
       audio.srcObject = null;
       remoteAudioRef.current.delete(userId);
     }
@@ -130,10 +116,7 @@ export function useVoiceChat(
           remoteAudioRef.current.set(targetUserId, audio);
         }
         audio.srcObject = event.streams[0];
-        audio.play().catch(() => {
-          blockedAudioElements.add(audio!);
-          installGestureListener();
-        });
+        playOrQueue(audio);
       };
 
       pc.onconnectionstatechange = () => {
@@ -163,14 +146,15 @@ export function useVoiceChat(
     [closePeerConnection]
   );
 
+  // Keep refs in sync so socket handlers (registered once) use latest functions
+  closePeerConnectionRef.current = closePeerConnection;
+  createPeerConnectionRef.current = createPeerConnection;
+
   const closeAllConnections = useCallback(() => {
     peerConnectionsRef.current.forEach((pc, id) => {
       pc.close();
       const audio = remoteAudioRef.current.get(id);
-      if (audio) {
-        blockedAudioElements.delete(audio);
-        audio.srcObject = null;
-      }
+      if (audio) audio.srcObject = null;
     });
     peerConnectionsRef.current.clear();
     remoteAudioRef.current.clear();
@@ -307,7 +291,8 @@ export function useVoiceChat(
     }
   }, [micEnabled, enableMic, disableMic, muteMic, unmuteMic]);
 
-  // WebRTC signalling handlers
+  // WebRTC signalling handlers — registered ONCE (empty deps).
+  // Use refs to access latest closePeerConnection / createPeerConnection.
   useEffect(() => {
     const handleVoiceOffer = async (data: {
       fromUserId: string;
@@ -319,13 +304,12 @@ export function useVoiceChat(
       if (pc && pc.signalingState === 'have-local-offer') {
         const myId = getSocketId();
         if (myId && myId > data.fromUserId) {
-          return; // we win — ignore their offer, they'll answer ours
+          return;
         }
-        // they win — rollback our offer, accept theirs
         await pc.setLocalDescription({ type: 'rollback' });
       }
 
-      if (!pc) pc = createPeerConnection(data.fromUserId);
+      if (!pc) pc = createPeerConnectionRef.current(data.fromUserId);
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -355,11 +339,11 @@ export function useVoiceChat(
     };
 
     const handleVoiceLeave = (data: { userId: string }) => {
-      closePeerConnection(data.userId);
+      closePeerConnectionRef.current(data.userId);
     };
 
     const handleUserLeft = (userId: string) => {
-      closePeerConnection(userId);
+      closePeerConnectionRef.current(userId);
     };
 
     socket.on('voice_offer', handleVoiceOffer);
@@ -375,7 +359,7 @@ export function useVoiceChat(
       socket.off('voice_leave', handleVoiceLeave);
       socket.off('user_left', handleUserLeft);
     };
-  }, [createPeerConnection, closePeerConnection]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-connect to new users with mic enabled
   useEffect(() => {
@@ -410,10 +394,7 @@ export function useVoiceChat(
     }
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
-    remoteAudioRef.current.forEach((audio) => {
-      blockedAudioElements.delete(audio);
-      audio.srcObject = null;
-    });
+    remoteAudioRef.current.forEach((audio) => { audio.srcObject = null; });
     remoteAudioRef.current.clear();
     try { socket.emit('voice_leave'); } catch { /* tab closing */ }
   };
