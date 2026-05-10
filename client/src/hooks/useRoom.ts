@@ -97,11 +97,13 @@ export function useRoom(): UseRoomReturn {
     const handleConnect = () => {
       setSocketConnected(true);
       setError(null);
-      if (status !== 'in_room') setStatus('connected');
 
-      // Auto-join if we have auth and were pending
-      if (joinPendingRef.current) {
+      // Re-join automatically on reconnect if we were in the room,
+      // or if a join was pending (initial connect).
+      if (selfIdRef.current || joinPendingRef.current) {
         socket.emit('join_room');
+      } else {
+        setStatus('connected');
       }
     };
 
@@ -128,7 +130,13 @@ export function useRoom(): UseRoomReturn {
       setJoinedSelf(payload.currentUser);
       selfIdRef.current = payload.currentUser.id;
       setUsers(payload.roomState.users);
-      setMessages(payload.roomState.messages.filter((m) => m.type === 'user'));
+      // Merge server history with local messages to avoid losing anything on reconnect
+      const serverMsgs = payload.roomState.messages.filter((m) => m.type === 'user');
+      setMessages((prev) => {
+        const ids = new Set(serverMsgs.map((m) => m.id));
+        const localOnly = prev.filter((m) => !ids.has(m.id));
+        return [...serverMsgs, ...localOnly].sort((a, b) => a.timestamp - b.timestamp).slice(-100);
+      });
       setStatus('in_room');
       setJoinPending(false);
       joinPendingRef.current = false;
@@ -150,7 +158,8 @@ export function useRoom(): UseRoomReturn {
 
     const handleRoomState = (state: { users: User[]; messages: ChatMessage[] }) => {
       setUsers(state.users);
-      setMessages(state.messages.filter((m) => m.type === 'user'));
+      // Don't replace messages — room_state broadcasts carry in-memory
+      // messages which may be staler than the DB history we loaded on join.
     };
 
     const handleUserJoined = (user: User) => {

@@ -16,7 +16,7 @@ interface UseVoiceChatReturn {
 
 // Optional TURN relay. Set VITE_TURN_URL (+ _USERNAME / _CREDENTIAL) in .env to enable.
 // Without TURN, peers behind strict NAT or mobile networks may fail to connect.
-// If VITE_TURN_URL is empty the connection falls back to STUN-only.
+// If VITE_TURN_URL is empty the connection falls back to public TURN + STUN.
 const _TURN_URL = (import.meta.env.VITE_TURN_URL as string | undefined) || '';
 const _TURN_USERNAME = (import.meta.env.VITE_TURN_USERNAME as string | undefined) || '';
 const _TURN_CREDENTIAL = (import.meta.env.VITE_TURN_CREDENTIAL as string | undefined) || '';
@@ -27,12 +27,49 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun1.l.google.com:19302' },
     ...(_TURN_URL
       ? [{ urls: _TURN_URL, username: _TURN_USERNAME, credential: _TURN_CREDENTIAL }]
-      : []),
+      : [
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject',
+          },
+        ]),
   ],
 };
 
 const SPEAKING_THRESHOLD = 15;
 const SPEAKING_CHECK_INTERVAL = 100;
+const RECONNECT_DELAY = 3000;
+
+// Autoplay-blocked audio elements waiting for a user gesture to play.
+const blockedAudioElements: Set<HTMLAudioElement> = new Set();
+let gestureListenerInstalled = false;
+
+function installGestureListener() {
+  if (gestureListenerInstalled) return;
+  gestureListenerInstalled = true;
+  const resumeAll = () => {
+    blockedAudioElements.forEach((audio) => {
+      void audio.play().catch(() => {});
+    });
+    blockedAudioElements.clear();
+    window.removeEventListener('click', resumeAll);
+    window.removeEventListener('keydown', resumeAll);
+    gestureListenerInstalled = false;
+  };
+  window.addEventListener('click', resumeAll, { once: false });
+  window.addEventListener('keydown', resumeAll, { once: false });
+}
 
 export function useVoiceChat(
   users: User[],
@@ -51,6 +88,7 @@ export function useVoiceChat(
   const audioContextRef = useRef<AudioContext | null>(null);
   const speakingIntervalRef = useRef<number | null>(null);
   const lastSpeakingRef = useRef(false);
+  const micEnabledRef = useRef(false);
 
   const getOtherUsers = useCallback(() => {
     const myId = getSocketId();
@@ -65,6 +103,7 @@ export function useVoiceChat(
     }
     const audio = remoteAudioRef.current.get(userId);
     if (audio) {
+      blockedAudioElements.delete(audio);
       audio.srcObject = null;
       remoteAudioRef.current.delete(userId);
     }
@@ -91,16 +130,24 @@ export function useVoiceChat(
           remoteAudioRef.current.set(targetUserId, audio);
         }
         audio.srcObject = event.streams[0];
-        // Browsers may block autoplay without a prior user gesture.
-        // Calling play() explicitly satisfies the policy where possible.
-        void audio.play().catch(() => {
-          // autoplay blocked — audio will start automatically after any user interaction
+        audio.play().catch(() => {
+          blockedAudioElements.add(audio!);
+          installGestureListener();
         });
       };
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed') {
           closePeerConnection(targetUserId);
+          setTimeout(() => {
+            if (!peerConnectionsRef.current.has(targetUserId) && micEnabledRef.current) {
+              const newPc = createPeerConnection(targetUserId);
+              newPc.createOffer().then(async (offer) => {
+                await newPc.setLocalDescription(offer);
+                socket.emit('voice_offer', { targetUserId, offer });
+              }).catch(() => {});
+            }
+          }, RECONNECT_DELAY);
         }
       };
 
@@ -120,7 +167,10 @@ export function useVoiceChat(
     peerConnectionsRef.current.forEach((pc, id) => {
       pc.close();
       const audio = remoteAudioRef.current.get(id);
-      if (audio) audio.srcObject = null;
+      if (audio) {
+        blockedAudioElements.delete(audio);
+        audio.srcObject = null;
+      }
     });
     peerConnectionsRef.current.clear();
     remoteAudioRef.current.clear();
@@ -174,15 +224,28 @@ export function useVoiceChat(
       localStreamRef.current = stream;
       startSpeakingDetection();
 
+      // Add local tracks to any existing receive-only connections
+      peerConnectionsRef.current.forEach((pc) => {
+        const senders = pc.getSenders();
+        if (senders.length === 0 || !senders[0].track) {
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream);
+          });
+        }
+      });
+
       const otherUsers = getOtherUsers();
       for (const user of otherUsers) {
-        const pc = createPeerConnection(user.id);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('voice_offer', { targetUserId: user.id, offer });
+        if (!peerConnectionsRef.current.has(user.id)) {
+          const pc = createPeerConnection(user.id);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('voice_offer', { targetUserId: user.id, offer });
+        }
       }
 
       setMicEnabled(true);
+      micEnabledRef.current = true;
       onMicStatusChange(true);
       void requestWakeLock();
     } catch (err) {
@@ -209,18 +272,40 @@ export function useVoiceChat(
     closeAllConnections();
     socket.emit('voice_leave');
     setMicEnabled(false);
+    micEnabledRef.current = false;
     setMicError(null);
     onMicStatusChange(false);
     void releaseWakeLock();
   }, [closeAllConnections, stopSpeakingDetection, onMicStatusChange, releaseWakeLock]);
 
+  const muteMic = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach((t) => { t.enabled = false; });
+    setMicEnabled(false);
+    micEnabledRef.current = false;
+    onMicStatusChange(false);
+  }, [onMicStatusChange]);
+
+  const unmuteMic = useCallback(() => {
+    if (!localStreamRef.current) return false;
+    localStreamRef.current.getTracks().forEach((t) => { t.enabled = true; });
+    setMicEnabled(true);
+    micEnabledRef.current = true;
+    onMicStatusChange(true);
+    return true;
+  }, [onMicStatusChange]);
+
   const toggleMic = useCallback(async () => {
     if (micEnabled) {
-      disableMic();
+      if (localStreamRef.current) {
+        muteMic();
+      } else {
+        disableMic();
+      }
     } else {
+      if (unmuteMic()) return;
       await enableMic();
     }
-  }, [micEnabled, enableMic, disableMic]);
+  }, [micEnabled, enableMic, disableMic, muteMic, unmuteMic]);
 
   // WebRTC signalling handlers
   useEffect(() => {
@@ -228,8 +313,18 @@ export function useVoiceChat(
       fromUserId: string;
       offer: RTCSessionDescriptionInit;
     }) => {
-      if (!micEnabled) return;
       let pc = peerConnectionsRef.current.get(data.fromUserId);
+
+      // Glare resolution: both sides sent offers simultaneously
+      if (pc && pc.signalingState === 'have-local-offer') {
+        const myId = getSocketId();
+        if (myId && myId > data.fromUserId) {
+          return; // we win — ignore their offer, they'll answer ours
+        }
+        // they win — rollback our offer, accept theirs
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
+
       if (!pc) pc = createPeerConnection(data.fromUserId);
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
       const answer = await pc.createAnswer();
@@ -280,11 +375,11 @@ export function useVoiceChat(
       socket.off('voice_leave', handleVoiceLeave);
       socket.off('user_left', handleUserLeft);
     };
-  }, [micEnabled, createPeerConnection, closePeerConnection]);
+  }, [createPeerConnection, closePeerConnection]);
 
   // Auto-connect to new users with mic enabled
   useEffect(() => {
-    if (!micEnabled) return;
+    if (!micEnabledRef.current) return;
     const otherUsers = getOtherUsers();
     for (const user of otherUsers) {
       if (!peerConnectionsRef.current.has(user.id)) {
@@ -295,7 +390,7 @@ export function useVoiceChat(
         });
       }
     }
-  }, [users, micEnabled, getOtherUsers, createPeerConnection]);
+  }, [users, getOtherUsers, createPeerConnection]);
 
   // Cleanup on unmount
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -315,7 +410,10 @@ export function useVoiceChat(
     }
     peerConnectionsRef.current.forEach((pc) => pc.close());
     peerConnectionsRef.current.clear();
-    remoteAudioRef.current.forEach((audio) => { audio.srcObject = null; });
+    remoteAudioRef.current.forEach((audio) => {
+      blockedAudioElements.delete(audio);
+      audio.srcObject = null;
+    });
     remoteAudioRef.current.clear();
     try { socket.emit('voice_leave'); } catch { /* tab closing */ }
   };
