@@ -25,22 +25,11 @@ const _TURN_CREDENTIAL = (import.meta.env.VITE_TURN_CREDENTIAL as string | undef
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
     ...(_TURN_URL
       ? [{ urls: _TURN_URL, username: _TURN_USERNAME, credential: _TURN_CREDENTIAL }]
       : [
           {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            urls: ['turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
             username: 'openrelayproject',
             credential: 'openrelayproject',
           },
