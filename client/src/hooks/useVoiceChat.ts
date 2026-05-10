@@ -73,7 +73,7 @@ export function useVoiceChat(
 
   const getOtherUsers = useCallback(() => {
     const myId = getSocketId();
-    return users.filter((u) => u.id !== myId && u.micEnabled);
+    return users.filter((u) => u.id !== myId);
   }, [users]);
 
   const closePeerConnection = useCallback((userId: string) => {
@@ -117,6 +117,7 @@ export function useVoiceChat(
       };
 
       pc.ontrack = (event) => {
+        console.log('[voice] ontrack from', targetUserId, 'streams:', event.streams.length);
         let audio = remoteAudioRef.current.get(targetUserId);
         if (!audio) {
           audio = new Audio();
@@ -131,12 +132,15 @@ export function useVoiceChat(
         if (pc.connectionState === 'failed') {
           closePeerConnection(targetUserId);
           setTimeout(() => {
-            if (!peerConnectionsRef.current.has(targetUserId) && micEnabledRef.current) {
+            if (!peerConnectionsRef.current.has(targetUserId)) {
               const newPc = createPeerConnection(targetUserId);
-              newPc.createOffer().then(async (offer) => {
-                await newPc.setLocalDescription(offer);
-                socket.emit('voice_offer', { targetUserId, offer });
-              }).catch(() => {});
+              const myId = getSocketId();
+              if (myId && myId < targetUserId) {
+                newPc.createOffer().then(async (offer) => {
+                  await newPc.setLocalDescription(offer);
+                  socket.emit('voice_offer', { targetUserId, offer });
+                }).catch(() => {});
+              }
             }
           }, RECONNECT_DELAY);
         }
@@ -217,23 +221,22 @@ export function useVoiceChat(
       localStreamRef.current = stream;
       startSpeakingDetection();
 
-      // Add local tracks to any existing receive-only connections
-      peerConnectionsRef.current.forEach((pc) => {
+      // Add local tracks to existing connections and renegotiate.
+      for (const [userId, pc] of peerConnectionsRef.current.entries()) {
         const senders = pc.getSenders();
-        if (senders.length === 0 || !senders[0].track) {
+        const hasTrack = senders.some((s) => s.track);
+        if (!hasTrack) {
           stream.getTracks().forEach((track) => {
             pc.addTrack(track, stream);
           });
-        }
-      });
-
-      const otherUsers = getOtherUsers();
-      for (const user of otherUsers) {
-        if (!peerConnectionsRef.current.has(user.id)) {
-          const pc = createPeerConnection(user.id);
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit('voice_offer', { targetUserId: user.id, offer });
+          try {
+            console.log('[voice] sending renegotiation offer to', userId);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('voice_offer', { targetUserId: userId, offer });
+          } catch (err) {
+            console.error('[voice] renegotiation failed for', userId, err);
+          }
         }
       }
 
@@ -254,7 +257,7 @@ export function useVoiceChat(
       setMicError(errorMessage);
       console.error('Failed to enable microphone:', err);
     }
-  }, [getOtherUsers, createPeerConnection, startSpeakingDetection, onMicStatusChange, requestWakeLock]);
+  }, [startSpeakingDetection, onMicStatusChange, requestWakeLock]);
 
   const disableMic = useCallback(() => {
     stopSpeakingDetection();
@@ -307,6 +310,7 @@ export function useVoiceChat(
       fromUserId: string;
       offer: RTCSessionDescriptionInit;
     }) => {
+      console.log('[voice] received offer from', data.fromUserId);
       let pc = peerConnectionsRef.current.get(data.fromUserId);
 
       // Glare resolution: both sides sent offers simultaneously
@@ -330,6 +334,7 @@ export function useVoiceChat(
       fromUserId: string;
       answer: RTCSessionDescriptionInit;
     }) => {
+      console.log('[voice] received answer from', data.fromUserId);
       const pc = peerConnectionsRef.current.get(data.fromUserId);
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
@@ -341,6 +346,7 @@ export function useVoiceChat(
       fromUserId: string;
       candidate: RTCIceCandidateInit;
     }) => {
+      console.log('[voice] received ICE from', data.fromUserId);
       const pc = peerConnectionsRef.current.get(data.fromUserId);
       // Queue candidates that arrive before remoteDescription is set.
       if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
@@ -379,17 +385,24 @@ export function useVoiceChat(
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-connect to new users with mic enabled
+  // Auto-connect to every other user as soon as they appear in the room.
+  // Mic state is irrelevant — connections exist regardless, tracks are
+  // added later via renegotiation in enableMic.
   useEffect(() => {
-    if (!micEnabledRef.current) return;
+    const myId = getSocketId();
     const otherUsers = getOtherUsers();
     for (const user of otherUsers) {
       if (!peerConnectionsRef.current.has(user.id)) {
         const pc = createPeerConnection(user.id);
-        pc.createOffer().then(async (offer) => {
-          await pc.setLocalDescription(offer);
-          socket.emit('voice_offer', { targetUserId: user.id, offer });
-        });
+        // Deterministic offerer: only the lower socket ID initiates.
+        // The other side will receive the offer and answer.
+        if (myId && myId < user.id) {
+          console.log('[voice] sending offer to', user.id);
+          pc.createOffer().then(async (offer) => {
+            await pc.setLocalDescription(offer);
+            socket.emit('voice_offer', { targetUserId: user.id, offer });
+          }).catch((err) => console.error('[voice] offer failed:', err));
+        }
       }
     }
   }, [users, getOtherUsers, createPeerConnection]);
