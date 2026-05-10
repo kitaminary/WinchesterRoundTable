@@ -26,6 +26,8 @@ interface RoomScreenProps {
   sendMessage: (text: string, options?: SendChatOptions) => void;
   onToggleMic: () => void;
   onLogout: () => void;
+  voicePlaybackBlocked: boolean;
+  onResumeVoicePlayback: () => void;
 }
 
 export function RoomScreen({
@@ -39,6 +41,8 @@ export function RoomScreen({
   seatSpeechBubbles,
   authUser,
   error,
+  voicePlaybackBlocked,
+  onResumeVoicePlayback,
   sendMessage,
   onToggleMic,
   onLogout,
@@ -64,6 +68,15 @@ export function RoomScreen({
         />
       </div>
       <header className="room-toolbar">
+        {voicePlaybackBlocked && (
+          <button
+            type="button"
+            className="voice-autoplay-banner"
+            onClick={() => onResumeVoicePlayback()}
+          >
+            Click anywhere to hear voice audio
+          </button>
+        )}
         <div className="room-toolbar-inner">
           <span className="room-toolbar-seat" aria-hidden>
             Winchester round table

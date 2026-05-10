@@ -58,11 +58,8 @@ export default function App() {
     seatSpeechBubbles,
   } = useRoom();
 
-  const { micEnabled, isSpeaking, micError, toggleMic, disableMic } = useVoiceChat(
-    users,
-    updateMicStatus,
-    updateSpeakingStatus
-  );
+  const { micEnabled, isSpeaking, micError, voicePlaybackBlocked, resumeVoicePlayback, toggleMic, disableMic } =
+    useVoiceChat(users, updateMicStatus, updateSpeakingStatus);
 
   useKeyboardShortcut('v', toggleMic, {
     enabled: status === 'in_room',
@@ -139,6 +136,8 @@ export default function App() {
         onLogout={handleLogout}
         authUser={authUser}
         error={error}
+        voicePlaybackBlocked={voicePlaybackBlocked}
+        onResumeVoicePlayback={resumeVoicePlayback}
       />
     );
   }

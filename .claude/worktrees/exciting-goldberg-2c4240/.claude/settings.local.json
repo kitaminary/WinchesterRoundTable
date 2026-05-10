@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(bash -n \"/c/Users/kitaminary/Desktop/WinchesterRoundTable/docker-entrypoint.sh\")"
+    ]
+  }
+}

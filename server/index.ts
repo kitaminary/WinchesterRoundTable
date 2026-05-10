@@ -17,6 +17,7 @@ import type {
   VoiceOfferPayload,
   VoiceAnswerPayload,
   VoiceIceCandidatePayload,
+  VoiceJoinPayload,
 } from './types.js';
 
 const CHAT_VERSION = process.env.CHAT_HISTORY_VERSION ?? '1';
@@ -47,7 +48,8 @@ const clientDistPath = path.resolve(process.cwd(), 'dist', 'client');
 const indexHtmlPath = path.join(clientDistPath, 'index.html');
 app.use(
   express.static(clientDistPath, {
-    maxAge: '7d', // knights/, fonts/, logo, favicon → 7-day browser cache
+    maxAge: '7d',
+    immutable: true,
     setHeaders(res, filePath) {
       // Vite outputs content-hashed filenames inside /assets/ → immutable forever
       if (filePath.includes(`${path.sep}assets${path.sep}`)) {
@@ -211,6 +213,12 @@ io.on('connection', (socket) => {
     if (!isValidBoolean(payload?.isSpeaking)) return;
     const ok = roomState.updateSpeakingStatus(socket.id, payload.isSpeaking);
     if (ok) io.emit('speaking_status', { userId: socket.id, isSpeaking: payload.isSpeaking });
+  });
+
+  socket.on('voice_join', (payload: VoiceJoinPayload) => {
+    if (!roomState.getUser(socket.id)) return;
+    const passive = Boolean(payload?.passive);
+    socket.broadcast.emit('voice_peer_ready', { userId: socket.id, passive });
   });
 
   socket.on('voice_offer', (payload: VoiceOfferPayload) => {

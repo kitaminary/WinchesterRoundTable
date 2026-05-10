@@ -10,6 +10,7 @@ import type {
   VoiceOfferPayload,
   VoiceAnswerPayload,
   VoiceIceCandidatePayload,
+  VoiceJoinPayload,
   JoinSuccessPayload,
   JoinErrorPayload,
   RoomNoticePayload,
@@ -30,6 +31,7 @@ interface ServerToClientEvents {
   voice_answer: (data: { fromUserId: string; answer: RTCSessionDescriptionInit }) => void;
   voice_ice_candidate: (data: { fromUserId: string; candidate: RTCIceCandidateInit }) => void;
   voice_leave: (data: { userId: string }) => void;
+  voice_peer_ready: (data: { userId: string; passive: boolean }) => void;
 }
 
 interface ClientToServerEvents {
@@ -40,6 +42,7 @@ interface ClientToServerEvents {
   voice_offer: (payload: VoiceOfferPayload) => void;
   voice_answer: (payload: VoiceAnswerPayload) => void;
   voice_ice_candidate: (payload: VoiceIceCandidatePayload) => void;
+  voice_join: (payload: VoiceJoinPayload) => void;
   voice_leave: () => void;
   leave_room: () => void;
 }

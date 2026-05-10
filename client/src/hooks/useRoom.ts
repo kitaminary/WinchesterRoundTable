@@ -141,6 +141,7 @@ export function useRoom(): UseRoomReturn {
       setJoinPending(false);
       joinPendingRef.current = false;
       setError(null);
+      socket.emit('voice_join', { passive: true });
     };
 
     const handleJoinError = (payload: { message: string }) => {

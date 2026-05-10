@@ -90,6 +90,10 @@ export interface VoiceIceCandidatePayload {
   candidate: RTCIceCandidateInit;
 }
 
+export interface VoiceJoinPayload {
+  passive?: boolean;
+}
+
 export interface SendChatOptions {
   replyToUserId?: string;
 }

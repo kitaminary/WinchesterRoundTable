@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { socket, getSocketId } from '../socket';
-import { playOrQueue } from '../lib/audioUnlock';
+import { unlockAudio } from '../lib/audioUnlock';
 import type { User } from '../types';
 import { useWakeLock } from './useWakeLock';
 
@@ -10,6 +10,8 @@ interface UseVoiceChatReturn {
   micError: string | null;
   wakeLockActive: boolean;
   wakeLockUnsupported: boolean;
+  voicePlaybackBlocked: boolean;
+  resumeVoicePlayback: () => void;
   toggleMic: () => Promise<void>;
   enableMic: () => Promise<void>;
   disableMic: () => void;
@@ -61,6 +63,31 @@ export function useVoiceChat(
   const speakingIntervalRef = useRef<number | null>(null);
   const lastSpeakingRef = useRef(false);
   const micEnabledRef = useRef(false);
+  const blockedVoicePeersRef = useRef<Set<string>>(new Set());
+  const [voicePlaybackBlocked, setVoicePlaybackBlocked] = useState(false);
+
+  const syncVoicePlaybackBlockedBanner = useCallback(() => {
+    setVoicePlaybackBlocked(blockedVoicePeersRef.current.size > 0);
+  }, []);
+
+  const markVoicePlaybackBlocked = useCallback(
+    (peerId: string) => {
+      blockedVoicePeersRef.current.add(peerId);
+      syncVoicePlaybackBlockedBanner();
+    },
+    [syncVoicePlaybackBlockedBanner]
+  );
+
+  const resumeVoicePlayback = useCallback(() => {
+    blockedVoicePeersRef.current.clear();
+    syncVoicePlaybackBlockedBanner();
+    unlockAudio();
+    remoteAudioRef.current.forEach((audio) => {
+      void audio.play().catch(() => {
+        /* user may need another gesture */
+      });
+    });
+  }, [syncVoicePlaybackBlockedBanner]);
 
   // Stable refs for values used inside socket handlers (registered once)
   const closePeerConnectionRef = useRef<(userId: string) => void>(() => {});
@@ -88,8 +115,11 @@ export function useVoiceChat(
       audio.remove();
       remoteAudioRef.current.delete(userId);
     }
+    if (blockedVoicePeersRef.current.delete(userId)) {
+      syncVoicePlaybackBlockedBanner();
+    }
     pendingCandidatesRef.current.delete(userId);
-  }, []);
+  }, [syncVoicePlaybackBlockedBanner]);
 
   const flushPendingCandidates = useCallback(async (userId: string, pc: RTCPeerConnection) => {
     const queued = pendingCandidatesRef.current.get(userId);
@@ -130,7 +160,17 @@ export function useVoiceChat(
           remoteAudioRef.current.set(targetUserId, audio);
         }
         audio.srcObject = event.streams[0];
-        playOrQueue(audio);
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              blockedVoicePeersRef.current.delete(targetUserId);
+              syncVoicePlaybackBlockedBanner();
+            })
+            .catch(() => {
+              markVoicePlaybackBlocked(targetUserId);
+            });
+        }
       };
 
       pc.onconnectionstatechange = () => {
@@ -160,7 +200,11 @@ export function useVoiceChat(
       peerConnectionsRef.current.set(targetUserId, pc);
       return pc;
     },
-    [closePeerConnection]
+    [
+      closePeerConnection,
+      markVoicePlaybackBlocked,
+      syncVoicePlaybackBlockedBanner,
+    ]
   );
 
   // Keep refs in sync so socket handlers (registered once) use latest functions
@@ -179,7 +223,9 @@ export function useVoiceChat(
     });
     peerConnectionsRef.current.clear();
     remoteAudioRef.current.clear();
-  }, []);
+    blockedVoicePeersRef.current.clear();
+    syncVoicePlaybackBlockedBanner();
+  }, [syncVoicePlaybackBlockedBanner]);
 
   const startSpeakingDetection = useCallback(() => {
     if (!localStreamRef.current) return;
@@ -223,6 +269,8 @@ export function useVoiceChat(
   }, [onSpeakingStatusChange]);
 
   const enableMic = useCallback(async () => {
+    // Same user gesture as the mic control: drain queued remote playback if any.
+    unlockAudio();
     setMicError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -374,6 +422,21 @@ export function useVoiceChat(
       closePeerConnectionRef.current(data.userId);
     };
 
+    const handleVoicePeerReady = (data: { userId: string }) => {
+      const peerId = data.userId;
+      const myId = getSocketId();
+      if (!myId || peerId === myId || peerConnectionsRef.current.has(peerId)) return;
+      const pc = createPeerConnectionRef.current(peerId);
+      if (myId < peerId) {
+        pc.createOffer()
+          .then(async (offer) => {
+            await pc.setLocalDescription(offer);
+            socket.emit('voice_offer', { targetUserId: peerId, offer });
+          })
+          .catch(() => {});
+      }
+    };
+
     const handleUserLeft = (userId: string) => {
       closePeerConnectionRef.current(userId);
     };
@@ -382,6 +445,7 @@ export function useVoiceChat(
     socket.on('voice_answer', handleVoiceAnswer);
     socket.on('voice_ice_candidate', handleVoiceIceCandidate);
     socket.on('voice_leave', handleVoiceLeave);
+    socket.on('voice_peer_ready', handleVoicePeerReady);
     socket.on('user_left', handleUserLeft);
 
     return () => {
@@ -389,6 +453,7 @@ export function useVoiceChat(
       socket.off('voice_answer', handleVoiceAnswer);
       socket.off('voice_ice_candidate', handleVoiceIceCandidate);
       socket.off('voice_leave', handleVoiceLeave);
+      socket.off('voice_peer_ready', handleVoicePeerReady);
       socket.off('user_left', handleUserLeft);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -438,8 +503,19 @@ export function useVoiceChat(
       audio.remove();
     });
     remoteAudioRef.current.clear();
+    blockedVoicePeersRef.current.clear();
+    syncVoicePlaybackBlockedBanner();
     try { socket.emit('voice_leave'); } catch { /* tab closing */ }
   };
+
+  useEffect(() => {
+    if (!voicePlaybackBlocked) return;
+    const handler = () => {
+      resumeVoicePlayback();
+    };
+    window.addEventListener('pointerdown', handler, true);
+    return () => window.removeEventListener('pointerdown', handler, true);
+  }, [voicePlaybackBlocked, resumeVoicePlayback]);
 
   useEffect(() => {
     return () => { cleanupRef.current?.(); };
@@ -459,6 +535,8 @@ export function useVoiceChat(
     micError,
     wakeLockActive,
     wakeLockUnsupported,
+    voicePlaybackBlocked,
+    resumeVoicePlayback,
     toggleMic,
     enableMic,
     disableMic,

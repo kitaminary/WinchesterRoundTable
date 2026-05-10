@@ -48,6 +48,7 @@ if bore_wanted; then
   BORE_TO=${BORE_SERVER:-bore.pub}
   echo "Starting bore tunnel..."
   echo "  Relay: $BORE_TO -> local :$PORT"
+  echo "  Public forwarding address: check bore lines in this container's logs (relay host plus remote port)."
   bore local "$PORT" --to "$BORE_TO" &
   BORE_PID=$!
   echo "  bore PID: $BORE_PID  (set ENABLE_BORE=0 to disable)"

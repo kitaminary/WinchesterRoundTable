@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 import { Users, Mic, MicOff } from 'lucide-react';
 import type { User } from '../types';
 import { KnightAvatar } from './KnightAvatar';

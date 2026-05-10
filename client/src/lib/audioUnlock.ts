@@ -7,6 +7,9 @@ function installFallbackListener(): void {
   listenerInstalled = true;
   const handler = () => {
     unlockAudio();
+    // Allow installFallbackListener() to attach again after a failed play()
+    // (handlers are removed here but listenerInstalled must not stay stuck true).
+    listenerInstalled = false;
     window.removeEventListener('click', handler, true);
     window.removeEventListener('keydown', handler, true);
     window.removeEventListener('touchstart', handler, true);
