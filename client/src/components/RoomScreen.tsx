@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, Volume2 } from 'lucide-react';
 import type {
   User,
   ChatMessage,
@@ -19,14 +19,15 @@ interface RoomScreenProps {
   micEnabled: boolean;
   isSpeaking: boolean;
   micError: string | null;
+  audioBlocked: boolean;
   activityNotice: string | null;
   seatSpeechBubbles: Record<string, SeatSpeechBubbleState>;
   authUser: AuthUser | null;
   error: string | null;
   sendMessage: (text: string, options?: SendChatOptions) => void;
   onToggleMic: () => void;
+  onRetryAudio: () => void;
   onLogout: () => void;
-
 }
 
 export function RoomScreen({
@@ -36,12 +37,14 @@ export function RoomScreen({
   micEnabled,
   isSpeaking,
   micError,
+  audioBlocked,
   activityNotice,
   seatSpeechBubbles,
   authUser,
   error,
   sendMessage,
   onToggleMic,
+  onRetryAudio,
   onLogout,
 }: RoomScreenProps) {
   const [replyTarget, setReplyTarget] = useState<ChatReplyTarget | null>(null);
@@ -75,6 +78,18 @@ export function RoomScreen({
             )}
           </span>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {audioBlocked && (
+              <button
+                type="button"
+                className="leave-table-button"
+                onClick={onRetryAudio}
+                title="Browser blocked autoplay — click to enable remote audio"
+                style={{ background: 'var(--accent-red, #c0392b)' }}
+              >
+                <Volume2 style={{ width: 16, height: 16 }} aria-hidden />
+                Enable sound
+              </button>
+            )}
             <button
               type="button"
               className="leave-table-button logout-button"

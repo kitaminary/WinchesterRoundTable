@@ -3,6 +3,7 @@ import { useRoom } from './hooks/useRoom';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { useKeyboardShortcut } from './hooks/useKeyboardShortcut';
 import { LoginScreen } from './components/LoginScreen';
+import { EnterChamberScreen } from './components/EnterChamberScreen';
 import { RoomScreen } from './components/RoomScreen';
 import { FullRoomScreen } from './components/FullRoomScreen';
 import { Loader2 } from 'lucide-react';
@@ -21,6 +22,7 @@ type AuthState = 'checking' | 'unauthenticated' | 'authenticated';
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>('checking');
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [chamberReady, setChamberReady] = useState(false);
 
   // On mount: validate stored token
   useEffect(() => {
@@ -58,7 +60,7 @@ export default function App() {
     seatSpeechBubbles,
   } = useRoom();
 
-  const { micEnabled, isSpeaking, micError, toggleMic, disableMic } =
+  const { micEnabled, isSpeaking, micError, audioBlocked, toggleMic, disableMic, retryAudio } =
     useVoiceChat(users, updateMicStatus, updateSpeakingStatus);
 
   useKeyboardShortcut('v', toggleMic, {
@@ -67,11 +69,10 @@ export default function App() {
     physicalCodes: ['KeyV'],
   });
 
-  // Connect socket and join room once authenticated
+  // Connect socket and join room once chamber is entered
   useEffect(() => {
-    if (authState !== 'authenticated') return;
+    if (authState !== 'authenticated' || !chamberReady) return;
     reconnectSocket();
-    // Wait for socket to connect, then join
     const onConnect = () => joinRoom();
     if (socket.connected) {
       joinRoom();
@@ -79,12 +80,19 @@ export default function App() {
       socket.once('connect', onConnect);
     }
     return () => { socket.off('connect', onConnect); };
-  }, [authState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authState, chamberReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAuthenticated = useCallback((user: AuthUser, token: string) => {
     storeToken(token);
     setAuthUser(user);
     setAuthState('authenticated');
+    // Login form submit is a user gesture — unlockAudio already called in LoginScreen.
+    // Go straight to room, no interstitial needed.
+    setChamberReady(true);
+  }, []);
+
+  const handleEnterChamber = useCallback(() => {
+    setChamberReady(true);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -96,6 +104,7 @@ export default function App() {
     clearToken();
     setAuthUser(null);
     setAuthState('unauthenticated');
+    setChamberReady(false);
   }, [micEnabled, disableMic, leaveTable]);
 
   // --- Render ---
@@ -116,6 +125,17 @@ export default function App() {
     return <LoginScreen onAuthenticated={handleAuthenticated} />;
   }
 
+  // Authenticated but hasn't clicked "Enter the Chamber" yet (returning user, no gesture)
+  if (!chamberReady && authUser) {
+    return (
+      <EnterChamberScreen
+        authUser={authUser}
+        onEnter={handleEnterChamber}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   if (status === 'room_full') {
     return <FullRoomScreen onRetry={retryAfterRoomFull} />;
   }
@@ -129,14 +149,15 @@ export default function App() {
         micEnabled={micEnabled}
         isSpeaking={isSpeaking}
         micError={micError}
+        audioBlocked={audioBlocked}
         activityNotice={activityNotice}
         seatSpeechBubbles={seatSpeechBubbles}
         sendMessage={sendMessage}
         onToggleMic={toggleMic}
+        onRetryAudio={retryAudio}
         onLogout={handleLogout}
         authUser={authUser}
         error={error}
-
       />
     );
   }

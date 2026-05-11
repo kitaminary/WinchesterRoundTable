@@ -51,9 +51,11 @@ const SOCKET_URL =
   typeof import.meta.env.VITE_SOCKET_URL === 'string' &&
   import.meta.env.VITE_SOCKET_URL.trim() !== ''
     ? import.meta.env.VITE_SOCKET_URL.trim()
-    : import.meta.env.DEV
-      ? 'http://localhost:3000'
-      : window.location.origin;
+    : window.location.origin;
+
+if (import.meta.env.DEV) {
+  console.log('[socket] URL:', SOCKET_URL);
+}
 
 export const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOCKET_URL, {
   autoConnect: false,        // we connect manually after auth

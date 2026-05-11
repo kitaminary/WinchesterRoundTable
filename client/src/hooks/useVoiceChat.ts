@@ -1,23 +1,48 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { socket, getSocketId } from '../socket';
-import { playOrQueue } from '../lib/audioUnlock';
+import { playOrQueue, isUnlocked, unlockAudio } from '../lib/audioUnlock';
 import type { User } from '../types';
 
-interface UseVoiceChatReturn {
+export interface UseVoiceChatReturn {
   micEnabled: boolean;
   isSpeaking: boolean;
   micError: string | null;
+  audioBlocked: boolean;
   toggleMic: () => Promise<void>;
   enableMic: () => Promise<void>;
   disableMic: () => void;
+  retryAudio: () => void;
 }
 
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
+const DEV = import.meta.env.DEV;
+
+function buildIceConfig(): RTCConfiguration {
+  const iceServers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
+  ];
+
+  const turnUrl = import.meta.env.VITE_TURN_URL?.trim();
+  const turnUser = import.meta.env.VITE_TURN_USERNAME?.trim();
+  const turnCred = import.meta.env.VITE_TURN_CREDENTIAL?.trim();
+
+  if (turnUrl && turnUser && turnCred) {
+    const urls = turnUrl.split(',').map((u) => u.trim()).filter(Boolean);
+    iceServers.push({ urls, username: turnUser, credential: turnCred });
+    if (DEV) {
+      console.log('[voice] TURN configured:', urls.map((u) => u.replace(/:[^:]+$/, ':****')));
+    }
+  } else if (DEV) {
+    console.warn(
+      '[voice] TURN is not configured; WebRTC may fail across NAT/mobile networks. ' +
+      'Set VITE_TURN_URL, VITE_TURN_USERNAME, VITE_TURN_CREDENTIAL in .env.'
+    );
+  }
+
+  return { iceServers };
+}
+
+const ICE_CONFIG = buildIceConfig();
 
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
@@ -32,6 +57,30 @@ interface PeerState {
   pc: RTCPeerConnection;
   candidateQueue: RTCIceCandidateInit[];
   makingOffer: boolean;
+  remoteCtx: AudioContext | null;
+}
+
+function playRemoteStream(stream: MediaStream, audio: HTMLAudioElement, targetUserId: string): void {
+  // Primary path: HTMLAudioElement with srcObject
+  audio.srcObject = stream;
+  audio.muted = false;
+
+  playOrQueue(audio);
+
+  // Secondary path: AudioContext routing bypasses autoplay policy once context is resumed.
+  // We keep both — HTMLAudioElement is the audible output, AudioContext is a
+  // belt-and-suspenders approach that also forces the browser to pull samples.
+  try {
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    src.connect(ctx.destination);
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    if (DEV) console.log(`[voice] AudioContext routing active for ${targetUserId}, state=${ctx.state}`);
+  } catch (err) {
+    if (DEV) console.warn(`[voice] AudioContext routing failed for ${targetUserId}:`, err);
+  }
 }
 
 export function useVoiceChat(
@@ -42,6 +91,7 @@ export function useVoiceChat(
   const [micEnabled, setMicEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   const micEnabledRef = useRef(false);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -64,11 +114,16 @@ export function useVoiceChat(
     const peer = peersRef.current.get(userId);
     if (peer) {
       peer.pc.close();
+      if (peer.remoteCtx) {
+        peer.remoteCtx.close().catch(() => {});
+      }
       peersRef.current.delete(userId);
     }
     const audio = remoteAudioRef.current.get(userId);
     if (audio) {
+      audio.pause();
       audio.srcObject = null;
+      audio.remove();
       remoteAudioRef.current.delete(userId);
     }
   }, []);
@@ -77,8 +132,8 @@ export function useVoiceChat(
     const existing = peersRef.current.get(targetUserId);
     if (existing) return existing;
 
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-    const state: PeerState = { pc, candidateQueue: [], makingOffer: false };
+    const pc = new RTCPeerConnection(ICE_CONFIG);
+    const state: PeerState = { pc, candidateQueue: [], makingOffer: false, remoteCtx: null };
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -90,18 +145,55 @@ export function useVoiceChat(
     };
 
     pc.ontrack = (e) => {
+      if (DEV) {
+        console.log(
+          `[voice] ontrack from ${targetUserId}: kind=${e.track.kind}`,
+          `streams=${e.streams.length}`,
+          `stream[0] active=${e.streams[0]?.active}`,
+          `track.readyState=${e.track.readyState}`
+        );
+      }
+
+      // Chrome may deliver ontrack with an empty streams array.
+      // Build a fresh MediaStream from the track itself.
+      const stream = e.streams[0]?.active
+        ? e.streams[0]
+        : new MediaStream([e.track]);
+
       let audio = remoteAudioRef.current.get(targetUserId);
       if (!audio) {
         audio = new Audio();
+        audio.autoplay = true;
+        audio.setAttribute('playsinline', '');
+        document.body.appendChild(audio);
         remoteAudioRef.current.set(targetUserId, audio);
       }
-      audio.srcObject = e.streams[0];
-      playOrQueue(audio);
+
+      playRemoteStream(stream, audio, targetUserId);
+
+      if (!isUnlocked()) {
+        if (DEV) console.warn('[voice] audio.play() likely blocked by autoplay policy');
+        setAudioBlocked(true);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (DEV) console.log(`[voice] ${targetUserId} iceConnection: ${pc.iceConnectionState}`);
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') pc.restartIce();
+      if (DEV) console.log(`[voice] ${targetUserId} connection: ${pc.connectionState}`);
+      if (pc.connectionState === 'failed') {
+        if (DEV) console.warn(`[voice] ${targetUserId} ICE restart triggered`);
+        pc.restartIce();
+      }
     };
+
+    if (DEV) {
+      pc.onsignalingstatechange = () => {
+        console.log(`[voice] ${targetUserId} signaling: ${pc.signalingState}`);
+      };
+    }
 
     peersRef.current.set(targetUserId, state);
     return state;
@@ -131,6 +223,22 @@ export function useVoiceChat(
     } finally {
       peer.makingOffer = false;
     }
+  }, []);
+
+  // ─── audio unlock retry ──────────────────────────────────
+
+  const retryAudio = useCallback(() => {
+    unlockAudio();
+    for (const audio of remoteAudioRef.current.values()) {
+      if (audio.srcObject && audio.paused) {
+        audio.play().then(() => {
+          if (DEV) console.log('[voice] retryAudio play() succeeded');
+        }).catch((err) => {
+          if (DEV) console.warn('[voice] retryAudio play() failed:', err);
+        });
+      }
+    }
+    setAudioBlocked(false);
   }, []);
 
   // ─── speaking detection ───────────────────────────────────
@@ -189,6 +297,9 @@ export function useVoiceChat(
       localStreamRef.current = stream;
       micEnabledRef.current = true;
       const track = stream.getAudioTracks()[0];
+
+      unlockAudio();
+      setAudioBlocked(false);
 
       for (const [userId, peer] of peersRef.current) {
         const audioT = peer.pc
@@ -281,6 +392,7 @@ export function useVoiceChat(
       fromUserId: string;
       offer: RTCSessionDescriptionInit;
     }) => {
+      if (data.fromUserId === getSocketId()) return;
       try {
         let peer = peersRef.current.get(data.fromUserId);
 
@@ -352,6 +464,7 @@ export function useVoiceChat(
     };
 
     const onPeerReady = (data: { userId: string }) => {
+      if (data.userId === getSocketId()) return;
       if (!micEnabledRef.current || !localStreamRef.current) return;
       if (peersRef.current.has(data.userId)) return;
       const peer = createPeer(data.userId);
@@ -415,10 +528,15 @@ export function useVoiceChat(
     if (audioContextRef.current) void audioContextRef.current.close();
     if (localStreamRef.current)
       localStreamRef.current.getTracks().forEach((t) => t.stop());
-    peersRef.current.forEach((p) => p.pc.close());
+    peersRef.current.forEach((p) => {
+      p.pc.close();
+      if (p.remoteCtx) p.remoteCtx.close().catch(() => {});
+    });
     peersRef.current.clear();
     remoteAudioRef.current.forEach((a) => {
+      a.pause();
       a.srcObject = null;
+      a.remove();
     });
     remoteAudioRef.current.clear();
     try {
@@ -436,5 +554,5 @@ export function useVoiceChat(
     return () => window.removeEventListener('beforeunload', h);
   }, []);
 
-  return { micEnabled, isSpeaking, micError, toggleMic, enableMic, disableMic };
+  return { micEnabled, isSpeaking, micError, audioBlocked, toggleMic, enableMic, disableMic, retryAudio };
 }
