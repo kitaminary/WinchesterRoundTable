@@ -7,8 +7,6 @@ function installFallbackListener(): void {
   listenerInstalled = true;
   const handler = () => {
     unlockAudio();
-    // Allow installFallbackListener() to attach again after a failed play()
-    // (handlers are removed here but listenerInstalled must not stay stuck true).
     listenerInstalled = false;
     window.removeEventListener('click', handler, true);
     window.removeEventListener('keydown', handler, true);
@@ -21,9 +19,6 @@ function installFallbackListener(): void {
   window.addEventListener('pointerdown', handler, true);
 }
 
-// Install at module load — any gesture anywhere unlocks audio.
-// This covers the case where the user is already authenticated and
-// never sees the LoginScreen (so its onClick unlock never fires).
 if (typeof window !== 'undefined') {
   installFallbackListener();
 }
@@ -31,28 +26,37 @@ if (typeof window !== 'undefined') {
 export function unlockAudio(): void {
   if (unlocked) return;
   unlocked = true;
-  pendingAudios.forEach((audio) => {
-    audio.play().catch((err) => {
-      console.warn('[audioUnlock] play failed:', err);
+  console.log('[audioUnlock] unlocked, flushing', pendingAudios.size, 'queued audio(s)');
+  for (const audio of pendingAudios) {
+    audio.play().then(() => {
+      console.log('[audioUnlock] queued play() succeeded');
+    }).catch((err) => {
+      console.warn('[audioUnlock] queued play() failed:', err);
     });
-  });
+  }
   pendingAudios.clear();
 }
 
 export function playOrQueue(audio: HTMLAudioElement): void {
   if (unlocked) {
-    audio.play().catch((err) => {
-      console.warn('[audioUnlock] play failed:', err);
-      // Queue for next gesture in case the failure is autoplay-related.
+    audio.play().then(() => {
+      console.log('[audioUnlock] play() succeeded');
+    }).catch((err) => {
+      console.warn('[audioUnlock] play() failed after unlock, re-queuing:', err);
       unlocked = false;
       pendingAudios.add(audio);
       installFallbackListener();
     });
   } else {
+    console.log('[audioUnlock] audio queued (not yet unlocked)');
     pendingAudios.add(audio);
   }
 }
 
 export function isUnlocked(): boolean {
   return unlocked;
+}
+
+export function getPendingCount(): number {
+  return pendingAudios.size;
 }

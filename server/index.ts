@@ -30,11 +30,29 @@ await initDb();
 const app = express();
 const httpServer = createServer(app);
 
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) return true;
+  try {
+    const { hostname } = new URL(origin);
+    if (hostname.endsWith('.ngrok-free.app') || hostname.endsWith('.ngrok.app')) return true;
+  } catch { /* invalid origin */ }
+  return true;
+}
+
+const corsOptions = {
+  origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+    cb(null, isAllowedOrigin(origin));
+  },
+  methods: ['GET', 'POST'],
+  credentials: true,
+};
+
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: { origin: true, methods: ['GET', 'POST'], credentials: true },
 });
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // ── REST routes ───────────────────────────────────────────────────────────────
